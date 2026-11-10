@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.1.0
-// @description  Compagnon pour yurocollection.fr. Première étape : commandes d'enregistrement (yuroDiag) pour comprendre le mode farm ; la relance du replay auto bloqué viendra dans une prochaine version, construite sur ces enregistrements.
+// @version      0.2.0
+// @description  Compagnon pour yurocollection.fr : relance le « replay auto » du mode farm quand un combat ne repart pas tout seul ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
 // @supportURL   https://github.com/xarregens/yuro-plus/issues
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.1.0";
+  const YURO_VERSION = "0.2.0";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -190,4 +190,88 @@
   const page = () => `fichier ${saveJson("yuro-diag", snapshot())} téléchargé (photo immédiate)`;
 
   window.yuroDiag = { menu, stop, download, page, dernier: null, version: YURO_VERSION };
+
+  // ---- relance du replay auto en mode farm ----
+  // Observé (enregistrements du 10/11/2026) : à la fin d'un combat farm, le site affiche
+  // section.story-end-screen.farm-end avec « ↻ Recommencer » (button[data-farm-start]) et, quand « Replay auto » est
+  // activé (button[data-combat-auto="replay"].is-on), relance tout seul le combat quelques secondes plus tard
+  // (POST /api/save/story-start). Quand il reste bloqué, cet écran ne part pas : au-delà du délai ci-dessous, le script
+  // clique « Recommencer » lui-même, celui-là même que le joueur aurait cliqué.
+  const SETTINGS_KEY = "yuro-plus:settings";
+  const readSettings = () => {
+    try {
+      return JSON.parse(localStorage.getItem(SETTINGS_KEY)) ?? {};
+    } catch {
+      return {};
+    }
+  };
+  const writeSetting = (name, value) => localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...readSettings(), [name]: value }));
+  const reglages = {
+    // au-delà de cette attente sur l'écran de fin (replay auto activé), le combat est considéré bloqué
+    attenteMs: 12e3,
+    // après ce nombre de clics sans effet sur le même écran, on arrête d'insister
+    essaisMax: 3,
+    verifieMs: 1e3,
+    active: readSettings().relanceAuto !== false
+  };
+  const END_SCREEN = "section.story-end-screen.farm-end";
+  const RESTART = "[data-farm-start]";
+  const AUTO_ON = '[data-combat-auto="replay"].is-on';
+  const visible = (node) => Boolean(node) && node.getBoundingClientRect().height > 0;
+  let toasts = null;
+  function toast(message) {
+    if (!toasts?.isConnected) {
+      toasts = document.createElement("div");
+      toasts.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:99999;display:flex;flex-direction:column;gap:8px;";
+      document.body.append(toasts);
+    }
+    const item = document.createElement("div");
+    item.style.cssText = "max-width:340px;padding:10px 14px;border:1px solid #2c3550;border-radius:10px;background:#161b26;color:#e8ecf5;font:13px/1.45 system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.45);";
+    item.textContent = message;
+    toasts.append(item);
+    setTimeout(() => item.remove(), 6e3);
+  }
+  let stuckSince = null;
+  let attempts = 0;
+  let announcedGiveUp = false;
+  function checkFarm() {
+    if (!reglages.active) return;
+    const endScreen = document.querySelector(END_SCREEN);
+    const autoOn = document.querySelector(AUTO_ON);
+    if (!visible(endScreen) || !visible(autoOn)) {
+      stuckSince = null;
+      attempts = 0;
+      announcedGiveUp = false;
+      return;
+    }
+    const now = Date.now();
+    stuckSince ??= now;
+    if (now - stuckSince < reglages.attenteMs) return;
+    if (attempts >= reglages.essaisMax) {
+      if (!announcedGiveUp) {
+        announcedGiveUp = true;
+        toast(`Yuro Plus : ${reglages.essaisMax} relances sans effet, j’arrête d’insister. yuroDiag.page() dans la console pour m’envoyer ce que voit le script.`);
+      }
+      return;
+    }
+    const restart = endScreen.querySelector(RESTART);
+    if (!visible(restart) || restart.disabled) return;
+    attempts++;
+    window.yuroPlus.relances++;
+    stuckSince = now;
+    toast(`Yuro Plus : replay auto resté bloqué ${Math.round(reglages.attenteMs / 1e3)} s, combat relancé.`);
+    restart.click();
+  }
+  setInterval(checkFarm, reglages.verifieMs);
+  window.yuroPlus = {
+    version: YURO_VERSION,
+    relances: 0,
+    reglages,
+    // yuroPlus.relanceAuto(false) coupe la relance (mémorisé), yuroPlus.relanceAuto(true) la remet
+    relanceAuto(on = true) {
+      reglages.active = Boolean(on);
+      writeSetting("relanceAuto", reglages.active);
+      return reglages.active ? "relance automatique activée" : "relance automatique coupée";
+    }
+  };
 })();
