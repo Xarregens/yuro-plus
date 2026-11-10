@@ -8,6 +8,9 @@ pas tout seuls. Il ne touche à rien d'autre : toggle éteint ou combat en cours
 Dans le **Château de l'infini**, un bouton « ⟳ Suivant auto » (ajouté par le script dans le bandeau du combat) lance la
 chambre suivante dès la victoire ; jamais après une défaite.
 
+En **Halloween**, un bouton « ⟳ Rejouer auto » (éteint par défaut) relance le combat dès la victoire quand le
+« Replay auto » du site est éteint ; il ne touche jamais à la citrouille ni aux défaites.
+
 ## Installation
 
 1. Installer l'extension Tampermonkey.
@@ -27,6 +30,7 @@ Les mises à jour sont automatiques (menu Tampermonkey → *Vérifier les mises 
 | `yuroPlus.relanceAuto(false)` | Coupe la relance automatique (mémorisé) ; `yuroPlus.relanceAuto(true)` la remet. |
 | `yuroPlus.relanceRapide(false)` | Plus de clic immédiat : le site relance lui-même, le script n'intervient qu'après 12 s de blocage (mémorisé). |
 | `yuroPlus.suivantAuto(false)` | Château de l'infini : ne plus lancer la chambre suivante (même effet que le bouton du bandeau). |
+| `yuroPlus.halloweenAuto(true)` | Halloween : relancer le combat à la victoire (même effet que le bouton du bandeau). |
 | `yuroPlus.relances` | Nombre de combats relancés depuis le chargement de la page. |
 
 ## Historique des versions

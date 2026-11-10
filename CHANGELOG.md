@@ -1,5 +1,11 @@
 # Changelog — Yuro Plus
 
+## 0.5.0
+- Halloween : nouveau bouton « ⟳ Rejouer auto » dans le bandeau (ajouté par le script, **éteint par défaut**, mémorisé).
+  Allumé, il clique « ↻ Affronter à nouveau » dès la victoire — jamais « Ouvrir une citrouille », jamais après une
+  défaite. À utiliser avec le « Replay auto » du site éteint : quand celui du site est allumé, son bandeau compact n'a
+  aucun bouton et c'est lui qui enchaîne, le script ne touche à rien. `yuroPlus.halloweenAuto(true/false)` en console.
+
 ## 0.4.0
 - Château de l'infini : nouveau bouton « ⟳ Suivant auto » dans le bandeau du combat (ajouté par le script, mémorisé,
   activé par défaut). À la victoire, la chambre suivante se lance toute seule ; jamais après une défaite (l'écran

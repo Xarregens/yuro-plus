@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.4.0
+// @version      0.5.0
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini (chambre suivante lancée à la victoire) ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.4.0";
+  const YURO_VERSION = "0.5.0";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -220,7 +220,10 @@
     active: readSettings().relanceAuto !== false,
     rapide: readSettings().relanceRapide !== false,
     // Château de l'infini : à la victoire, lancer la chambre suivante (bouton « Suivant auto » du bandeau)
-    suivant: readSettings().suivantAuto !== false
+    suivant: readSettings().suivantAuto !== false,
+    // Halloween : à la victoire, cliquer « Affronter à nouveau » (notre bouton « Rejouer auto », éteint par défaut :
+    // le site a son propre Replay auto pour ce mode ; le nôtre sert quand celui du site est éteint)
+    halloween: readSettings().halloweenAuto === true
   };
   const END_SCREEN = "section.story-end-screen.farm-end";
   const RESTART = "[data-farm-start]";
@@ -301,42 +304,81 @@
     raisonLente: "écran de victoire resté affiché",
     compte: () => window.yuroPlus.suivantes++
   });
-  // le bouton « Suivant auto », même habillage que le « Replay auto » du site, dans le bandeau du combat du château
-  function mountTowerToggle() {
-    const quit = document.querySelector("header button[data-infinity-lobby]");
-    const header = quit?.closest("header");
-    if (!header || header.querySelector('[data-yuro-auto="next"]')) return;
+  // Halloween (enregistrements du 10/11/2026) : Replay auto du site allumé → bandeau compact hw-end-compact sans aucun
+  // bouton, le site enchaîne lui-même, le script ne touche à rien. Replay auto du site éteint → grand écran hw-end avec
+  // « ↻ Affronter à nouveau » [data-hw26-play] : notre « Rejouer auto » le clique à la victoire. Jamais [data-hw26-open]
+  // (la citrouille dépense des bonbons), jamais sur un écran lost.
+  const checkHalloween = createWatcher({
+    trouve: () => {
+      if (!reglages.halloween) return null;
+      const again = document.querySelector("section.story-end-screen.hw-end.won button[data-hw26-play]");
+      return again && !again.disabled && visible(again) ? again : null;
+    },
+    nomAction: "combat Halloween relancé",
+    raisonLente: "écran de victoire resté affiché",
+    compte: () => window.yuroPlus.relancesHalloween++
+  });
+  // nos interrupteurs dans le bandeau du combat, même habillage que le « Replay auto » du site
+  function repaintToggle(id, on) {
+    const button = document.querySelector(`[data-yuro-auto="${id}"]`);
+    if (!button) return;
+    button.className = `btn ghost small combat-auto-btn${on ? " is-on" : ""}`;
+    button.setAttribute("aria-pressed", String(on));
+    button.querySelector("em").textContent = on ? "ON" : "OFF";
+  }
+  function mountToggle({ id, header, label, title, lire, ecrire }) {
+    if (!header || header.querySelector(`[data-yuro-auto="${id}"]`)) return;
     const state = document.createElement("em");
     const button = document.createElement("button");
     button.type = "button";
-    button.setAttribute("data-yuro-auto", "next");
-    button.title = "Ajouté par Yuro Plus : à la victoire, la chambre suivante se lance toute seule";
-    const paint = () => {
-      button.className = `btn ghost small combat-auto-btn${reglages.suivant ? " is-on" : ""}`;
-      button.setAttribute("aria-pressed", String(reglages.suivant));
-      state.textContent = reglages.suivant ? "ON" : "OFF";
-    };
-    button.append("⟳ Suivant auto", state);
+    button.setAttribute("data-yuro-auto", id);
+    button.title = title;
+    button.append(label, state);
     button.addEventListener("click", () => {
-      reglages.suivant = !reglages.suivant;
-      writeSetting("suivantAuto", reglages.suivant);
-      paint();
+      ecrire(!lire());
+      repaintToggle(id, lire());
     });
-    paint();
     const group = document.createElement("span");
     group.className = "combat-auto-group";
     group.append(button);
     header.append(group);
+    repaintToggle(id, lire());
+  }
+  function mountToggles() {
+    mountToggle({
+      id: "next",
+      header: document.querySelector("header button[data-infinity-lobby]")?.closest("header"),
+      label: "⟳ Suivant auto",
+      title: "Ajouté par Yuro Plus : à la victoire, la chambre suivante se lance toute seule",
+      lire: () => reglages.suivant,
+      ecrire: (on) => {
+        reglages.suivant = on;
+        writeSetting("suivantAuto", on);
+      }
+    });
+    mountToggle({
+      id: "hw",
+      header: [...document.querySelectorAll("header")].find((node) => /HALLOWEEN/i.test(node.querySelector(".eyebrow")?.textContent ?? "")),
+      label: "⟳ Rejouer auto",
+      title: "Ajouté par Yuro Plus : à la victoire, relance le combat (« Affronter à nouveau »). Utile quand le Replay auto du site est éteint ; quand il est allumé, c’est le site qui enchaîne.",
+      lire: () => reglages.halloween,
+      ecrire: (on) => {
+        reglages.halloween = on;
+        writeSetting("halloweenAuto", on);
+      }
+    });
   }
   setInterval(() => {
-    mountTowerToggle();
+    mountToggles();
     checkFarm();
     checkTower();
+    checkHalloween();
   }, reglages.verifieMs);
   window.yuroPlus = {
     version: YURO_VERSION,
     relances: 0,
     suivantes: 0,
+    relancesHalloween: 0,
     reglages,
     // yuroPlus.relanceAuto(false) coupe toute relance (mémorisé), yuroPlus.relanceAuto(true) la remet
     relanceAuto(on = true) {
@@ -348,13 +390,15 @@
     suivantAuto(on = true) {
       reglages.suivant = Boolean(on);
       writeSetting("suivantAuto", reglages.suivant);
-      const mounted = document.querySelector('[data-yuro-auto="next"]');
-      if (mounted) {
-        mounted.classList.toggle("is-on", reglages.suivant);
-        mounted.setAttribute("aria-pressed", String(reglages.suivant));
-        mounted.querySelector("em").textContent = reglages.suivant ? "ON" : "OFF";
-      }
+      repaintToggle("next", reglages.suivant);
       return reglages.suivant ? "Suivant auto activé : à la victoire, la chambre suivante se lance toute seule" : "Suivant auto coupé";
+    },
+    // yuroPlus.halloweenAuto(true) : relancer le combat Halloween à la victoire (même effet que le bouton du bandeau)
+    halloweenAuto(on = true) {
+      reglages.halloween = Boolean(on);
+      writeSetting("halloweenAuto", reglages.halloween);
+      repaintToggle("hw", reglages.halloween);
+      return reglages.halloween ? "Rejouer auto (Halloween) activé : à la victoire, « Affronter à nouveau » est cliqué" : "Rejouer auto (Halloween) coupé";
     },
     // yuroPlus.relanceRapide(false) : plus de clic immédiat, seulement le secours après 12 s (mémorisé)
     relanceRapide(on = true) {
