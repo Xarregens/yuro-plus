@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.9.0
+// @version      0.9.1
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini, « Citrouilles auto » et journal des cartes rares en Halloween ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.9.0";
+  const YURO_VERSION = "0.9.1";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -232,6 +232,9 @@
     // d'écran de fin à laisser respirer (la lecture des rares est garantie avant « Ouvrir encore », quelle que
     // soit la vitesse)
     citrouillesMs: 100,
+    // un bouton d'ouverture désactivé n'arrête la boucle que s'il le reste aussi longtemps : le site le coupe
+    // aussi brièvement pendant ses animations
+    patienceMs: 8e3,
     // « mode éclair » : pendant que Citrouilles auto tourne, raccourcir les animations du site dans le dialogue
     // d'ouverture (et seulement là). yuroPlus.citrouillesEclair(false) si un écran se comporte mal (mémorisé).
     eclair: readSettings().citrouillesEclair !== false
@@ -394,8 +397,9 @@
   //    .summary-card-series ; triées plus rares en premier, 10 par page, pager #packSummaryPager
   //    [data-summary-page]), pastilles de comptage .qol-pack-recap (« UR ×1 · SR ×2 … ») dans #revealHint
   //    (« 10 citrouilles · 50 cartes »), barre .pack-actions avec « 🎃 Ouvrir encore ×N » #openAnotherPack qui
-  //    renvoie à l'étape 1. La meilleure carte (tuile big-pull-hidden) porte déjà son nom et sa rareté dans la page :
-  //    pas besoin de la retourner pour la noter.
+  //    renvoie à l'étape 1. La meilleure carte (tuile big-pull-hidden, classe revealed une fois retournée) doit être
+  //    RÉVÉLÉE d'un clic — le joueur le fait à chaque fois — avant que l'enchaînement reparte : le script la clique
+  //    donc aussi (rien n'est dépensé), et c'est au passage là que nom et rareté deviennent sûrs dans la page.
   // « Citrouilles auto » enchaîne ces clics-là (jamais la pagination de collection, jamais « Voir ma collection »).
   // Les cartes UR, LR, EX et TRS sont notées dans un journal mémorisé (yuroPlus.cartesRares()), que l'ouverture soit
   // automatique ou manuelle. Arrêt de la boucle : bouton éteint, bouton d'ouverture désactivé (plus de bonbons), ou
@@ -488,17 +492,28 @@
     majEclair(); // rendre tout de suite ses animations au dialogue
     if (citrouilles.rares > 0) montrePanneauRares(); // récap de fin de séance : les rares trouvées, sans console
   }
+  // un bouton d'ouverture désactivé ne veut pas toujours dire « plus de bonbons » : le site le coupe aussi le temps
+  // d'une animation. On ne s'arrête que s'il le reste au-delà de patienceMs.
+  const desactiveDepuis = { boutique: null, encore: null };
+  function patiente(cle, bouton, raison) {
+    if (!bouton.disabled) {
+      desactiveDepuis[cle] = null;
+      return bouton;
+    }
+    desactiveDepuis[cle] ??= Date.now();
+    if (Date.now() - desactiveDepuis[cle] > reglages.patienceMs) {
+      desactiveDepuis[cle] = null;
+      arretCitrouilles(raison);
+    }
+    return null;
+  }
   // boutique (dialogue fermé) : cliquer « Ouvrir ×N » avec la quantité que le joueur a choisie
   const checkOuvrir = createWatcher({
     trouve: () => {
       if (!reglages.citrouilles || hw26Dialog()) return null;
       const bouton = document.querySelector("button.hw26-open-main");
       if (!visible(bouton)) return null;
-      if (bouton.disabled) {
-        arretCitrouilles("le site n’autorise plus d’ouverture (plus assez de bonbons ?)");
-        return null;
-      }
-      return bouton;
+      return patiente("boutique", bouton, "« Ouvrir » est resté désactivé (plus assez de bonbons ?)");
     },
     nomAction: "ouverture lancée depuis la boutique",
     raisonLente: "boutique restée affichée",
@@ -529,11 +544,29 @@
     compte: () => {},
     delai: () => reglages.citrouillesMs
   });
-  // étape 3a : s'il reste des rares annoncées à lire, tourner la page du récapitulatif
+  // étape 3a : révéler la meilleure carte (face cachée tant qu'on ne la clique pas ; le site attend ce geste avant de
+  // laisser repartir « Ouvrir encore », et le joueur le fait lui-même à chaque ouverture)
+  const CARTE_CACHEE = "#packCards .reveal-card.pack-summary-tile.big-pull-hidden:not(.revealed)";
+  const carteCachee = (dialog) => {
+    const tuile = dialog.querySelector(CARTE_CACHEE);
+    return tuile && visible(tuile) ? tuile : null;
+  };
+  const checkRevele = createWatcher({
+    trouve: () => {
+      const dialog = reglages.citrouilles ? hw26Dialog() : null;
+      return dialog ? carteCachee(dialog) : null;
+    },
+    nomAction: "meilleure carte révélée",
+    raisonLente: "carte mystère restée face cachée",
+    compte: () => {},
+    delai: () => reglages.citrouillesMs
+  });
+  // étape 3b : s'il reste des rares annoncées à lire, tourner la page du récapitulatif (jamais avant d'avoir révélé :
+  // la carte mystère est en page 1, il ne faut pas la quitter face cachée)
   const checkPages = createWatcher({
     trouve: () => {
       const dialog = reglages.citrouilles ? hw26Dialog() : null;
-      if (!dialog || !tirage || recapLu(dialog)) return null;
+      if (!dialog || !tirage || carteCachee(dialog) || recapLu(dialog)) return null;
       const suivantes = dialog.querySelector("#packSummaryPager [data-summary-page]:last-of-type");
       return suivantes && visible(suivantes) && !suivantes.disabled ? suivantes : null;
     },
@@ -542,18 +575,18 @@
     compte: () => {},
     delai: () => reglages.citrouillesMs
   });
-  // étape 3b : rares notées → « Ouvrir encore ×N », et la boucle repart à l'étape 1
+  // étape 3c : carte révélée et rares notées → « Ouvrir encore ×N », et la boucle repart à l'étape 1
   const checkEncore = createWatcher({
     trouve: () => {
       const dialog = reglages.citrouilles ? hw26Dialog() : null;
       if (!dialog) return null;
       const encore = dialog.querySelector("#openAnotherPack");
-      if (!encore || !visible(encore) || !recapLu(dialog)) return null;
-      if (encore.disabled) {
-        arretCitrouilles("le site n’autorise plus d’ouverture (plus assez de bonbons ?)");
+      if (!encore || !visible(encore)) {
+        desactiveDepuis.encore = null;
         return null;
       }
-      return encore;
+      if (carteCachee(dialog) || !recapLu(dialog)) return null;
+      return patiente("encore", encore, "« Ouvrir encore » est resté désactivé (plus assez de bonbons ?)");
     },
     nomAction: "citrouilles suivantes ouvertes",
     raisonLente: "récapitulatif resté affiché",
@@ -898,6 +931,7 @@
     checkOuvrir();
     checkCitrouille();
     checkPasser();
+    checkRevele();
     checkPages();
     checkEncore();
   });
@@ -910,6 +944,7 @@
     checkOuvrir();
     checkCitrouille();
     checkPasser();
+    checkRevele();
     checkPages();
     checkEncore();
   });

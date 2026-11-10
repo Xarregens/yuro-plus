@@ -1,7 +1,8 @@
 // Boutique Halloween : « Citrouilles auto » (éteint par défaut, jamais mémorisé) enchaîne Ouvrir ×N → citrouille →
-// « Tout passer » → lecture des rares (pages tournées si besoin) → « Ouvrir encore ×N » ; s'arrête tout seul quand le
-// site désactive l'ouverture ; journal des cartes UR/LR/EX/TRS mémorisé, alimenté aussi lors d'une ouverture manuelle ;
-// ne touche jamais quantité, « Voir ma collection », « Revenir à l'onglet » ni le dialogue des boosters classiques.
+// « Tout passer » → révélation de la carte mystère (le site n'active « Ouvrir encore » qu'après) → lecture des rares
+// (pages tournées si besoin) → « Ouvrir encore ×N » ; patiente si le bouton n'est désactivé qu'un instant, s'arrête
+// s'il le reste ; journal des cartes UR/LR/EX/TRS mémorisé, alimenté aussi lors d'une ouverture manuelle ; ne touche
+// jamais quantité, « Voir ma collection », « Revenir à l'onglet » ni le dialogue des boosters classiques.
 const { chromium } = require('playwright');
 const fs = require('fs');
 const script = fs.readFileSync(process.argv[2], 'utf8');
@@ -22,19 +23,23 @@ const PAGE = `<!doctype html><html><body><main>
 </main><script>
 // Simulation de la boutique : mêmes identifiants et classes que le vrai site (enregistrements du 10/11/2026)
 const $ = (s) => document.querySelector(s);
-const tuile = (code, nom, numero, serie, tag) => '<button class="reveal-card pack-summary-tile revealed"><span class="reveal-front">'
+const front = (code, nom, numero, serie, tag) => '<span class="reveal-front">'
  + '<span class="summary-card-top"><strong>' + nom + '</strong><span>' + code + '</span></span>'
  + '<span class="summary-card-art"><span>' + numero + '</span></span>'
  + '<span class="summary-card-series">' + serie + '</span></span>'
- + '<span class="summary-copy-tag">' + tag + '</span></button>';
+ + '<span class="summary-copy-tag">' + tag + '</span>';
+const tuile = (code, nom, numero, serie, tag) => '<button class="reveal-card pack-summary-tile revealed">' + front(code, nom, numero, serie, tag) + '</button>';
+// la meilleure carte : face cachée, aucune donnée dedans tant qu'elle n'est pas révélée (comme le vrai site)
+const cachee = '<button class="reveal-card pack-summary-tile pack-summary-best big-pull-hidden"><b>À RÉVÉLER</b></button>';
 const remplissage = (n) => Array.from({ length: n }, (_, i) => tuile('C', 'Figurant ' + i, '#9' + i, 'Série ' + i, 'Doublon')).join('');
-// deux ouvertures : la 1re a une UR en page 1 (rien à tourner), la 2e annonce UR + TRS mais la TRS est en page 2,
-// et son « Ouvrir encore » est désactivé (plus de bonbons) pour vérifier l'arrêt automatique
+// deux ouvertures, chacune avec une carte mystère à révéler avant que le site n'active « Ouvrir encore » :
+// la 1re le réactive 400 ms après la révélation (désactivation passagère : la boucle doit patienter, pas s'arrêter) ;
+// la 2e annonce UR + TRS, la TRS est en page 2, et son « Ouvrir encore » reste désactivé (plus de bonbons) → arrêt.
 window.__tirages = [
- { chips: '<i><b>UR</b>×1</i><i><b>SR</b>×2</i>', pages: [tuile('UR', 'Hidan', '#889', 'Naruto', 'Doublon') + remplissage(9)], encoreDesactive: false },
- { chips: '<i><b>UR</b>×1</i><i><b>TRS</b>×1</i>', pages: [tuile('UR', 'Madara', '#100', 'Naruto', 'Nouvelle') + remplissage(9), tuile('TRS', 'Goku', '#007', 'Dragon Ball', 'Nouvelle') + remplissage(9)], encoreDesactive: true }
+ { chips: '<i><b>UR</b>×1</i><i><b>SR</b>×2</i>', front: front('UR', 'Hidan', '#889', 'Naruto', 'Doublon'), pages: [cachee + remplissage(9)], encoreApres: 400 },
+ { chips: '<i><b>UR</b>×1</i><i><b>TRS</b>×1</i>', front: front('UR', 'Madara', '#100', 'Naruto', 'Nouvelle'), pages: [cachee + remplissage(9), tuile('TRS', 'Goku', '#007', 'Dragon Ball', 'Nouvelle') + remplissage(9)], encoreApres: -1 }
 ];
-window.__clics = { ouvre: 0, tear: 0, skip: 0, pages: 0, encore: 0, qty: 0, keep: 0, retour: 0 };
+window.__clics = { ouvre: 0, tear: 0, skip: 0, revele: 0, pages: 0, encore: 0, qty: 0, keep: 0, retour: 0 };
 let courant = -1, pageCourante = 0;
 const montre = (el, oui) => { el.style.display = oui ? '' : 'none'; };
 function etape(nom) {
@@ -51,10 +56,22 @@ window.__recap = (indice) => {
  courant = indice; pageCourante = 0;
  const t = window.__tirages[indice];
  $('#revealHint').innerHTML = '10 citrouilles · 50 cartes<span class="qol-pack-recap">' + t.chips + '</span>';
- $('#openAnotherPack').disabled = t.encoreDesactive;
+ // comme le vrai site : « Ouvrir encore » reste désactivé tant que la carte mystère n'est pas révélée
+ $('#openAnotherPack').disabled = t.pages[0].includes('big-pull-hidden');
  window.__page(0);
  etape('recap');
 };
+// révélation de la carte mystère : la donnée de la carte n'apparaît qu'à ce moment-là, puis le site réactive
+// (ou non) « Ouvrir encore » après un délai
+$('#packCards').addEventListener('click', (e) => {
+ const mystere = e.target.closest('.big-pull-hidden');
+ if (!mystere || mystere.classList.contains('revealed')) return;
+ window.__clics.revele++;
+ mystere.classList.add('revealed');
+ mystere.insertAdjacentHTML('beforeend', window.__tirages[courant].front);
+ const apres = window.__tirages[courant].encoreApres;
+ if (apres >= 0) setTimeout(() => { $('#openAnotherPack').disabled = false; }, apres);
+});
 window.__page = (p) => {
  pageCourante = p;
  const t = window.__tirages[courant];
@@ -81,7 +98,7 @@ etape('ferme');
   const boot = async () => {
     await page.goto(`https://yurocollection.fr/?t=${Date.now()}#hw26`);
     await page.addScriptTag({ content: script });
-    await page.evaluate(() => { Object.assign(yuroPlus.reglages, { rapideMs: 150, reessaiMs: 500 }); });
+    await page.evaluate(() => { Object.assign(yuroPlus.reglages, { rapideMs: 150, reessaiMs: 500, patienceMs: 1500 }); });
     await page.waitForSelector('.hw26-checkout [data-yuro-auto="pk"]', { timeout: 3000 });
   };
   const out = {};
@@ -120,7 +137,7 @@ etape('ferme');
     journal: yuroPlus.cartesRares().length
   }));
   // 4. ouverture manuelle (bouton éteint) : la rare est notée quand même, mais aucun clic du script
-  await page.evaluate(() => { window.__tirages[0].pages[0] = window.__tirages[0].pages[0].replace('>UR<', '>LR<').replace('Hidan', 'Alucard'); window.__recap(0); });
+  await page.evaluate(() => { window.__tirages[0] = { chips: '<i><b>LR</b>×1</i>', front: '', pages: [tuile('LR', 'Alucard', '#666', 'Hellsing', 'Nouvelle') + remplissage(9)], encoreApres: -1 }; window.__recap(0); });
   await page.waitForFunction(() => yuroPlus.citrouilles.rares === 1, null, { timeout: 3000 });
   await page.waitForTimeout(700);
   out.manuel = await page.evaluate(() => ({ clics: { ...window.__clics }, dernier: yuroPlus.cartesRares().at(-1).nom, journal: yuroPlus.cartesRares().length }));
@@ -138,7 +155,7 @@ etape('ferme');
   out.errors = errors;
   const ok = out.monte === '🎃 Citrouilles autoOFF'
     && Object.values(out.eteint).every((n) => n === 0)
-    && out.clics.ouvre === 1 && out.clics.tear === 2 && out.clics.skip === 2 && out.clics.pages === 1 && out.clics.encore === 1
+    && out.clics.ouvre === 1 && out.clics.tear === 2 && out.clics.skip === 2 && out.clics.revele === 2 && out.clics.pages === 1 && out.clics.encore === 1
     && out.clics.qty === 0 && out.clics.keep === 0 && out.clics.retour === 0
     && out.compteurs.ouvertes === 20 && out.compteurs.cartes === 100 && out.compteurs.rares === 3
     && JSON.stringify(out.journal) === JSON.stringify(['UR Hidan #889 Naruto Doublon', 'UR Madara #100 Naruto Nouvelle', 'TRS Goku #007 Dragon Ball Nouvelle'])
