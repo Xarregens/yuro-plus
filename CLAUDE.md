@@ -4,8 +4,14 @@ Un seul programme : `yuroPlus.user.js`, userscript Tampermonkey pour le jeu yuro
 (Xarregens) n'est pas développeur : parler simplement, livrer des versions complètes, tester avant d'envoyer, ne jamais
 toucher au vrai site autrement qu'en lecture. Même façon de travailler que le dépôt frère `kyara-plus` (Kyara Plus).
 
-- Objectif : relancer le « replay auto » du mode farm quand un combat ne repart pas tout seul. Le site n'est pas encore
-  connu : tout part des enregistrements `yuroDiag` (page(), menu(), download()) fournis par le propriétaire.
+- Ce que fait le script (0.7.x) : relance immédiate du replay auto en farm (`createWatcher`), « Suivant auto » dans le
+  Château de l'infini et « Rejouer auto » en Halloween (interrupteurs du script montés dans le bandeau par
+  `mountToggle`, remontés sur mutation pour ne pas clignoter), série V · D · bonbons en Halloween, et maintien du jeu
+  quand l'onglet est caché (`installFond`). Réglages dans l'objet `reglages`, mémorisés sous `yuro-plus:settings` ;
+  commandes console `yuroPlus.*` (relanceAuto, relanceRapide, suivantAuto, halloweenAuto, arrierePlan).
+- Toute connaissance du site vient des enregistrements `yuroDiag` (page(), menu(), download()) fournis par le
+  propriétaire : pour un écran inconnu ou un bogue, demander un `yuroDiag.page()` pris au bon moment avant de coder.
+  Le script ne clique que les boutons que le joueur cliquerait, jamais ceux qui dépensent, et ne forge aucune requête.
 - Version : `// @version` **et** `var YURO_VERSION`, à incrémenter à chaque publication. Garder `@updateURL` /
   `@downloadURL` vers ce dépôt. Publier = commit sur `main` (Tampermonkey met à jour depuis l'URL Raw).
 - Vérifier : `node --check yuroPlus.user.js`, puis `cd tests && node yuro.cjs ../yuroPlus.user.js` (navigateur simulé,
