@@ -8,5 +8,5 @@ Lancer depuis ce dossier : `node yuro.cjs ../yuroPlus.user.js`
 | --- | --- |
 | `farm.cjs` | Relance du farm : clic immédiat par défaut (sans message), retentatives puis arrêt, mode secours 12 s (`relanceRapide(false)`), rien si toggle OFF ou relance coupée, réglages mémorisés. |
 | `tower.cjs` | Château de l'infini : bouton « Suivant auto » monté et mémorisé, chambre suivante à la victoire, rien à la défaite, compteur dédié. |
-| `hw.cjs` | Halloween : « Rejouer auto » monté (éteint par défaut), « Affronter à nouveau » cliqué à la victoire une fois allumé, jamais la citrouille / la défaite / le bandeau compact, mémorisé. |
+| `hw.cjs` | Halloween : « Rejouer auto » monté (éteint par défaut), « Affronter à nouveau » cliqué à la victoire une fois allumé, jamais la citrouille / la défaite / le bandeau compact, mémorisé ; bandeau redessiné sans clignotement ; série V · D · bonbons comptée et remise à zéro. |
 | `yuro.cjs` | Commandes `yuroDiag` : requêtes notées en continu (masquage des e-mails et clés sensibles), enregistrement des clics et mutations, photo immédiate, WebSocket notée, téléchargement. |

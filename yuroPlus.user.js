@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.5.1
+// @version      0.6.0
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini (chambre suivante lancée à la victoire) ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.5.1";
+  const YURO_VERSION = "0.6.0";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -318,6 +318,61 @@
     raisonLente: "écran de victoire resté affiché",
     compte: () => window.yuroPlus.relancesHalloween++
   });
+  // Notre « Série V · D » pour Halloween : le compteur du site n'existe que pour son propre enchaînement. Quand notre
+  // « Rejouer auto » enchaîne, on compte nous-mêmes chaque écran de fin (une fois par écran) : victoires, défaites et
+  // bonbons gagnés. Remis à zéro à chaque allumage du bouton.
+  const hwSerie = { v: 0, d: 0, bonbons: 0 };
+  let hwScreenSeen = false;
+  function countHalloween() {
+    const screen = document.querySelector("section.story-end-screen.hw-end");
+    if (!visible(screen)) {
+      hwScreenSeen = false;
+      return;
+    }
+    if (hwScreenSeen) return;
+    hwScreenSeen = true;
+    if (!reglages.halloween) return;
+    if (screen.classList.contains("won")) {
+      hwSerie.v++;
+      const gain = parseInt((screen.querySelector(".hw-end-gain b, .hw-end-strip-gain")?.textContent ?? "").replace(/[^0-9]/g, ""), 10);
+      if (gain) hwSerie.bonbons += gain;
+    } else if (screen.classList.contains("lost")) {
+      hwSerie.d++;
+    }
+  }
+  // le badge, même habillage que celui du site (classe qol-series), monté à côté de notre bouton
+  function updateHwBadge(header) {
+    let badge = header?.querySelector('[data-yuro-serie]');
+    if (!header || !reglages.halloween || hwSerie.v + hwSerie.d === 0) {
+      badge?.remove();
+      return;
+    }
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "qol-series";
+      badge.setAttribute("data-yuro-serie", "");
+      badge.title = "Série comptée par Yuro Plus (Rejouer auto) : victoires · défaites · bonbons gagnés. Remise à zéro à l’allumage du bouton.";
+      const bold = document.createElement("b");
+      bold.textContent = "Série";
+      badge.append(bold);
+      for (let index = 0; index < 3; index++) {
+        if (index) {
+          const dot = document.createElement("i");
+          dot.textContent = "·";
+          badge.append(dot);
+        }
+        badge.append(document.createElement("span"));
+      }
+      const group = header.querySelector('[data-yuro-auto="hw"]')?.parentElement;
+      if (group) group.before(badge);
+      else header.append(badge);
+    }
+    const [vSpan, dSpan, candySpan] = badge.querySelectorAll(":scope > span");
+    const values = [`${hwSerie.v} V`, `${hwSerie.d} D`, `+${hwSerie.bonbons} bonbons`];
+    [vSpan, dSpan, candySpan].forEach((span, index) => {
+      if (span.textContent !== values[index]) span.textContent = values[index];
+    });
+  }
   // nos interrupteurs dans le bandeau du combat, même habillage que le « Replay auto » du site
   function repaintToggle(id, on) {
     const button = document.querySelector(`[data-yuro-auto="${id}"]`);
@@ -356,19 +411,27 @@
         writeSetting("suivantAuto", on);
       }
     });
+    const hwHeader = [...document.querySelectorAll("header")].find((node) => /HALLOWEEN/i.test(node.querySelector(".eyebrow")?.textContent ?? ""));
     mountToggle({
       id: "hw",
-      header: [...document.querySelectorAll("header")].find((node) => /HALLOWEEN/i.test(node.querySelector(".eyebrow")?.textContent ?? "")),
+      header: hwHeader,
       label: "⟳ Rejouer auto",
       title: "Ajouté par Yuro Plus : à la victoire, relance le combat (« Affronter à nouveau »). Utile quand le Replay auto du site est éteint ; quand il est allumé, c’est le site qui enchaîne.",
       lire: () => reglages.halloween,
       ecrire: (on) => {
         reglages.halloween = on;
         writeSetting("halloweenAuto", on);
+        if (on) {
+          hwSerie.v = 0;
+          hwSerie.d = 0;
+          hwSerie.bonbons = 0;
+        }
       }
     });
+    updateHwBadge(hwHeader);
   }
   setInterval(() => {
+    countHalloween();
     mountToggles();
     checkFarm();
     checkTower();
@@ -382,6 +445,7 @@
     relances: 0,
     suivantes: 0,
     relancesHalloween: 0,
+    serieHalloween: hwSerie,
     reglages,
     // yuroPlus.relanceAuto(false) coupe toute relance (mémorisé), yuroPlus.relanceAuto(true) la remet
     relanceAuto(on = true) {
@@ -400,6 +464,11 @@
     halloweenAuto(on = true) {
       reglages.halloween = Boolean(on);
       writeSetting("halloweenAuto", reglages.halloween);
+      if (reglages.halloween) {
+        hwSerie.v = 0;
+        hwSerie.d = 0;
+        hwSerie.bonbons = 0;
+      }
       repaintToggle("hw", reglages.halloween);
       return reglages.halloween ? "Rejouer auto (Halloween) activé : à la victoire, « Affronter à nouveau » est cliqué" : "Rejouer auto (Halloween) coupé";
     },

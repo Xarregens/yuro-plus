@@ -1,5 +1,11 @@
 # Changelog — Yuro Plus
 
+## 0.6.0
+- Halloween : quand notre « Rejouer auto » enchaîne, le compteur de série du site n'apparaît pas (il n'existe que pour
+  son propre enchaînement). Le script affiche donc le sien au même endroit, même habillage : « Série 3 V · 1 D ·
+  +360 bonbons ». Il compte chaque fin de combat et repart de zéro à chaque allumage du bouton.
+  `yuroPlus.serieHalloween` en console donne le détail.
+
 ## 0.5.1
 - Les boutons « Rejouer auto » et « Suivant auto » ne clignotent plus à chaque tour de combat : le site redessine son
   bandeau à chaque tour, le script remet maintenant ses boutons immédiatement, avant l'affichage suivant.

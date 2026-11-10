@@ -9,7 +9,8 @@ Dans le **Château de l'infini**, un bouton « ⟳ Suivant auto » (ajouté par 
 chambre suivante dès la victoire ; jamais après une défaite.
 
 En **Halloween**, un bouton « ⟳ Rejouer auto » (éteint par défaut) relance le combat dès la victoire quand le
-« Replay auto » du site est éteint ; il ne touche jamais à la citrouille ni aux défaites.
+« Replay auto » du site est éteint ; il ne touche jamais à la citrouille ni aux défaites. Une « Série V · D ·
+bonbons » maison s'affiche dans le bandeau pendant l'enchaînement, remise à zéro à chaque allumage.
 
 ## Installation
 
