@@ -4,13 +4,14 @@ Un seul programme : `yuroPlus.user.js`, userscript Tampermonkey pour le jeu yuro
 (Xarregens) n'est pas développeur : parler simplement, livrer des versions complètes, tester avant d'envoyer, ne jamais
 toucher au vrai site autrement qu'en lecture. Même façon de travailler que le dépôt frère `kyara-plus` (Kyara Plus).
 
-- Ce que fait le script (0.8.x) : relance immédiate du replay auto en farm (`createWatcher`), « Suivant auto » dans le
+- Ce que fait le script (0.9.x) : relance immédiate du replay auto en farm (`createWatcher`), « Suivant auto » dans le
   Château de l'infini et « Rejouer auto » en Halloween (interrupteurs du script montés dans le bandeau par
   `mountToggle`, remontés sur mutation pour ne pas clignoter), série V · D · bonbons en Halloween, « Citrouilles
-  auto » + journal des cartes rares dans la boutique Halloween, et maintien du jeu quand l'onglet est caché
-  (`installFond`). Réglages dans l'objet `reglages`, mémorisés sous `yuro-plus:settings` (sauf `citrouilles`, jamais
-  mémorisé) ; commandes console `yuroPlus.*` (relanceAuto, relanceRapide, suivantAuto, halloweenAuto, citrouillesAuto,
-  cartesRares, arrierePlan).
+  auto » + journal des cartes rares dans la boutique Halloween (panneau « ✦ Rares » sur le site, ouvert tout seul en
+  fin de séance), et maintien du jeu quand l'onglet est caché (`installFond`). Réglages dans l'objet `reglages`,
+  mémorisés sous `yuro-plus:settings` (sauf `citrouilles`, jamais mémorisé) ; commandes console `yuroPlus.*`
+  (relanceAuto, relanceRapide, suivantAuto, halloweenAuto, citrouillesAuto, citrouillesEclair, cartesRares,
+  arrierePlan).
 - Toute connaissance du site vient des enregistrements `yuroDiag` (page(), menu(), download()) fournis par le
   propriétaire : pour un écran inconnu ou un bogue, demander un `yuroDiag.page()` pris au bon moment avant de coder.
   Le script ne clique que les boutons que le joueur cliquerait, jamais ceux qui dépensent, et ne forge aucune requête.
@@ -47,7 +48,14 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   barre `.pack-actions` avec `#openAnotherPack` « Ouvrir encore ×N » qui reboucle sur la citrouille. La meilleure
   carte (tuile `big-pull-hidden`) porte déjà nom et rareté dans la page : pas besoin de la retourner. « Citrouilles
   auto » enchaîne ces clics ; le journal des UR/LR/EX/TRS (`yuro-plus:cartes-rares`, plafonné à 300) est alimenté même
-  en ouverture manuelle ; arrêt automatique quand le site désactive l'ouverture (plus de bonbons).
+  en ouverture manuelle ; arrêt automatique quand le site désactive l'ouverture (plus de bonbons). Vitesse : la chaîne
+  bat sur son propre ticker 100 ms avec le délai `citrouillesMs` (100 ms, au lieu de `rapideMs`), et le « mode
+  éclair » (`eclair`, mémorisé sous `citrouillesEclair`) raccourcit à 1 ms animations/transitions dans `#packDialog`
+  seulement, pendant la séance seulement (jamais 0 ms : animationend/transitionend doivent continuer d'arriver au
+  site). La lecture des rares reste garantie : `litRecapitulatif` attend que compte et tuiles soient affichés, et
+  `recapLu` relit la page avant d'autoriser « Ouvrir encore ». Historique visible sur le site : bouton « ✦ Rares (N) »
+  à côté de l'interrupteur, panneau `#yuro-plus-rares` (liste, vidage), ouvert automatiquement en fin de séance s'il y
+  a eu des rares.
 - Arrière-plan : les vérifications battent dans un Web Worker (créé depuis un blob ; si le site ajoutait une CSP
   worker-src, retomber sur setInterval). `installFond` masque document.hidden/visibilityState, retient
   visibilitychange, et rejoue rAF + setTimeout/setInterval posés pendant que l'onglet est caché (ids ≥ 2e9 pour ne

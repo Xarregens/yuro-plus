@@ -91,9 +91,21 @@ etape('ferme');
   await page.waitForTimeout(800);
   out.eteint = await page.evaluate(() => ({ ...window.__clics }));
   // 2. allumé : la chaîne complète s'enchaîne, les rares sont notées (page 2 lue quand il en manque),
-  // puis arrêt automatique quand « Ouvrir encore » est désactivé
+  // puis arrêt automatique quand « Ouvrir encore » est désactivé ; le mode éclair (animations raccourcies)
+  // n'existe que pendant la séance
+  await page.evaluate(() => {
+    window.__eclairVu = false;
+    setInterval(() => { if (document.getElementById('yuro-plus-eclair')) window.__eclairVu = true; }, 20);
+  });
   await page.click('.hw26-checkout [data-yuro-auto="pk"]');
   await page.waitForFunction(() => yuroPlus.reglages.citrouilles === false, null, { timeout: 20000 });
+  out.eclair = await page.evaluate(() => ({ pendant: window.__eclairVu, apres: Boolean(document.getElementById('yuro-plus-eclair')) }));
+  // à l'arrêt, le panneau des rares s'est ouvert tout seul avec la séance dedans
+  out.panneauAuto = await page.evaluate(() => {
+    const p = document.getElementById('yuro-plus-rares');
+    return p ? { goku: /Goku/.test(p.textContent), hidan: /Hidan/.test(p.textContent), compte: /3 carte/.test(p.textContent) } : 'absent';
+  });
+  out.boutonRares = await page.evaluate(() => document.querySelector('.hw26-checkout [data-yuro-rares]')?.textContent ?? 'absent');
   out.clics = await page.evaluate(() => ({ ...window.__clics }));
   out.compteurs = await page.evaluate(() => ({ ...yuroPlus.citrouilles }));
   out.journal = await page.evaluate(() => yuroPlus.cartesRares().map((c) => `${c.rarete} ${c.nom} ${c.numero} ${c.serie} ${c.etiquette}`));
@@ -112,8 +124,17 @@ etape('ferme');
   await page.waitForFunction(() => yuroPlus.citrouilles.rares === 1, null, { timeout: 3000 });
   await page.waitForTimeout(700);
   out.manuel = await page.evaluate(() => ({ clics: { ...window.__clics }, dernier: yuroPlus.cartesRares().at(-1).nom, journal: yuroPlus.cartesRares().length }));
-  // 5. cartesRares('vider') efface le journal : la lecture suivante renvoie le message « aucune carte… »
-  out.vider = await page.evaluate(() => { yuroPlus.cartesRares('vider'); return yuroPlus.cartesRares(); });
+  // 5. le bouton « ✦ Rares » ouvre le panneau (toute l'histoire, pas que la séance), « Vider le journal » l'efface,
+  // et cartesRares() relit alors le message « aucune carte… »
+  out.panneau = await page.evaluate(() => {
+    document.querySelector('.hw26-checkout [data-yuro-rares]').click();
+    const p = document.getElementById('yuro-plus-rares');
+    const avant = { bouton: document.querySelector('.hw26-checkout [data-yuro-rares]').textContent, alucard: /Alucard/.test(p.textContent), hidan: /Hidan/.test(p.textContent) };
+    [...p.querySelectorAll('button')].find((b) => /Vider/.test(b.textContent)).click();
+    const apres = { vide: /Aucune carte rare/.test(document.getElementById('yuro-plus-rares').textContent) };
+    return { avant, apres };
+  });
+  out.vider = await page.evaluate(() => yuroPlus.cartesRares());
   out.errors = errors;
   const ok = out.monte === '🎃 Citrouilles autoOFF'
     && Object.values(out.eteint).every((n) => n === 0)
@@ -122,8 +143,12 @@ etape('ferme');
     && out.compteurs.ouvertes === 20 && out.compteurs.cartes === 100 && out.compteurs.rares === 3
     && JSON.stringify(out.journal) === JSON.stringify(['UR Hidan #889 Naruto Doublon', 'UR Madara #100 Naruto Nouvelle', 'TRS Goku #007 Dragon Ball Nouvelle'])
     && out.toggleDialogue === 'OFF' && /20 citrouille/.test(out.badge) && /3 rare/.test(out.badge)
+    && out.eclair.pendant && !out.eclair.apres
+    && out.panneauAuto.goku && out.panneauAuto.hidan && out.panneauAuto.compte
+    && out.boutonRares === '✦ Rares (3)'
     && out.pasMemorise.off && !out.pasMemorise.reglage && out.pasMemorise.journal === 3
     && out.manuel.clics.encore === 0 && out.manuel.clics.ouvre === 0 && out.manuel.dernier === 'Alucard' && out.manuel.journal === 4
+    && out.panneau.avant.bouton === '✦ Rares (4)' && out.panneau.avant.alucard && out.panneau.avant.hidan && out.panneau.apres.vide
     && typeof out.vider === 'string'
     && errors.length === 0;
   console.log(JSON.stringify(out, null, 1));
