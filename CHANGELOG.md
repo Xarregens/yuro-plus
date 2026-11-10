@@ -1,5 +1,12 @@
 # Changelog — Yuro Plus
 
+## 0.7.0
+- Le jeu continue quand l'onglet n'est pas visible (couvert par une autre fenêtre ou réduit). Le navigateur gèle
+  normalement les animations et ralentit les horloges d'un onglet caché, ce qui figeait les combats et les relances.
+  Le script fait maintenant battre ses vérifications dans un moteur à part jamais ralenti, laisse croire au site que
+  l'onglet est visible, et rejoue lui-même animations et minuteries pendant ce temps. `yuroPlus.arrierePlan(false)`
+  rend la main au navigateur (mémorisé). Plus besoin de garder la page au premier plan ni en plein écran.
+
 ## 0.6.0
 - Halloween : quand notre « Rejouer auto » enchaîne, le compteur de série du site n'apparaît pas (il n'existe que pour
   son propre enchaînement). Le script affiche donc le sien au même endroit, même habillage : « Série 3 V · 1 D ·

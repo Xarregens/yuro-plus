@@ -21,6 +21,9 @@ bonbons » maison s'affiche dans le bandeau pendant l'enchaînement, remise à z
 
 Les mises à jour sont automatiques (menu Tampermonkey → *Vérifier les mises à jour* pour forcer).
 
+Le jeu **continue quand l'onglet est caché** (recouvert ou réduit) : le script neutralise le gel des onglets en
+arrière-plan du navigateur. `yuroPlus.arrierePlan(false)` pour revenir au comportement normal.
+
 ## Commandes console (F12 → Console)
 
 | Commande | Effet |
@@ -32,6 +35,7 @@ Les mises à jour sont automatiques (menu Tampermonkey → *Vérifier les mises 
 | `yuroPlus.relanceRapide(false)` | Plus de clic immédiat : le site relance lui-même, le script n'intervient qu'après 12 s de blocage (mémorisé). |
 | `yuroPlus.suivantAuto(false)` | Château de l'infini : ne plus lancer la chambre suivante (même effet que le bouton du bandeau). |
 | `yuroPlus.halloweenAuto(true)` | Halloween : relancer le combat à la victoire (même effet que le bouton du bandeau). |
+| `yuroPlus.arrierePlan(false)` | Laisser le navigateur geler le jeu quand l'onglet est caché (mémorisé). |
 | `yuroPlus.relances` | Nombre de combats relancés depuis le chargement de la page. |
 
 ## Historique des versions

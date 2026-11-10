@@ -25,5 +25,9 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   enchaîne seul : rien à cliquer, pas de secours possible). ÉTEINT → grand écran `hw-end` won/lost avec
   `[data-hw26-play]` « Affronter à nouveau », `[data-hw26-open]` « Ouvrir une citrouille » (DÉPENSE des bonbons, ne
   jamais cliquer) et `[data-hw26-back]`. Le bandeau du mode se reconnaît à l'eyebrow « HALLOWEEN ».
+- Arrière-plan : les vérifications battent dans un Web Worker (créé depuis un blob ; si le site ajoutait une CSP
+  worker-src, retomber sur setInterval). `installFond` masque document.hidden/visibilityState, retient
+  visibilitychange, et rejoue rAF + setTimeout/setInterval posés pendant que l'onglet est caché (ids ≥ 2e9 pour ne
+  pas croiser les ids natifs). Réglage `fondActif`.
 - Le script note en permanence (mémoire glissante) les requêtes fetch/XHR du site et sa WebSocket, e-mails et clés
   sensibles masqués ; ne jamais enregistrer de jeton en clair dans un fichier téléchargé.

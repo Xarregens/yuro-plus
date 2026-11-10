@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.6.0
+// @version      0.7.0
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini (chambre suivante lancée à la victoire) ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.6.0";
+  const YURO_VERSION = "0.7.0";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -430,15 +430,133 @@
     });
     updateHwBadge(hwHeader);
   }
-  setInterval(() => {
+  // ---- fonctionnement en arrière-plan ----
+  // Onglet caché (couvert ou réduit), le navigateur gèle les animations et ralentit les minuteries jusqu'à une par
+  // minute : le combat du site se fige et nos vérifications aussi. Parades, coupables par yuroPlus.arrierePlan(false) :
+  // 1. nos vérifications battent dans un Web Worker, que le navigateur ne ralentit pas ;
+  // 2. le site croit l'onglet toujours visible (document.hidden / visibilityState, événement visibilitychange retenu) ;
+  // 3. les animations (requestAnimationFrame) et minuteries que le site pose pendant que l'onglet est caché sont
+  //    rejouées par le worker, au rythme de verifieMs : invisible de toute façon, et le jeu avance.
+  const fond = { actif: readSettings().fondActif !== false };
+  function createTicker(ms) {
+    const listeners = new Set();
+    const fire = () => listeners.forEach((listener) => {
+      try {
+        listener();
+      } catch {}
+    });
+    try {
+      const worker = new Worker(URL.createObjectURL(new Blob([`setInterval(() => postMessage(0), ${ms});`], { type: "text/javascript" })));
+      worker.addEventListener("message", fire);
+    } catch {
+      setInterval(fire, ms);
+    }
+    return { add: (listener) => listeners.add(listener) };
+  }
+  const tick = createTicker(reglages.verifieMs);
+  function installFond() {
+    const proto = Document.prototype;
+    const realHiddenGet = Object.getOwnPropertyDescriptor(proto, "hidden")?.get;
+    const realStateGet = Object.getOwnPropertyDescriptor(proto, "visibilityState")?.get;
+    const isHidden = () => {
+      try {
+        return realHiddenGet ? realHiddenGet.call(document) : false;
+      } catch {
+        return false;
+      }
+    };
+    try {
+      Object.defineProperty(proto, "hidden", { configurable: true, get() {
+        return fond.actif && this === document ? false : isHidden();
+      } });
+      Object.defineProperty(proto, "visibilityState", { configurable: true, get() {
+        if (fond.actif && this === document) return "visible";
+        try {
+          return realStateGet ? realStateGet.call(this) : "visible";
+        } catch {
+          return "visible";
+        }
+      } });
+    } catch {}
+    const swallow = (event) => {
+      if (fond.actif) event.stopImmediatePropagation();
+    };
+    for (const type of ["visibilitychange", "webkitvisibilitychange"]) {
+      document.addEventListener(type, swallow, true);
+      window.addEventListener(type, swallow, true);
+    }
+    const nativeRaf = window.requestAnimationFrame.bind(window);
+    const nativeCancelRaf = window.cancelAnimationFrame.bind(window);
+    let nextId = 2e9;
+    const rafQueue = new Map();
+    window.requestAnimationFrame = (callback) => {
+      if (!fond.actif || !isHidden() || typeof callback !== "function") return nativeRaf(callback);
+      const id = ++nextId;
+      rafQueue.set(id, callback);
+      return id;
+    };
+    window.cancelAnimationFrame = (id) => {
+      rafQueue.delete(id);
+      nativeCancelRaf(id);
+    };
+    const nativeSetTimeout = window.setTimeout.bind(window);
+    const nativeClearTimeout = window.clearTimeout.bind(window);
+    const nativeSetInterval = window.setInterval.bind(window);
+    const nativeClearInterval = window.clearInterval.bind(window);
+    const timers = new Map();
+    window.setTimeout = (callback, delay = 0, ...args) => {
+      if (!fond.actif || !isHidden() || typeof callback !== "function") return nativeSetTimeout(callback, delay, ...args);
+      const id = ++nextId;
+      timers.set(id, { at: Date.now() + (Number(delay) || 0), callback, args });
+      return id;
+    };
+    window.clearTimeout = (id) => {
+      timers.delete(id);
+      nativeClearTimeout(id);
+    };
+    window.setInterval = (callback, delay = 0, ...args) => {
+      if (!fond.actif || !isHidden() || typeof callback !== "function") return nativeSetInterval(callback, delay, ...args);
+      const id = ++nextId;
+      timers.set(id, { at: Date.now() + (Number(delay) || 0), every: Math.max(Number(delay) || 0, reglages.verifieMs), callback, args });
+      return id;
+    };
+    window.clearInterval = (id) => {
+      timers.delete(id);
+      nativeClearInterval(id);
+    };
+    tick.add(() => {
+      if (!fond.actif || !isHidden()) return;
+      if (rafQueue.size) {
+        const callbacks = [...rafQueue.values()];
+        rafQueue.clear();
+        const stamp = performance.now();
+        for (const callback of callbacks) {
+          try {
+            callback(stamp);
+          } catch {}
+        }
+      }
+      const now = Date.now();
+      for (const [id, timer] of [...timers]) {
+        if (timer.at > now) continue;
+        if (timer.every) timer.at = now + timer.every;
+        else timers.delete(id);
+        try {
+          timer.callback(...timer.args);
+        } catch {}
+      }
+    });
+  }
+  installFond();
+  tick.add(() => {
     countHalloween();
     mountToggles();
     checkFarm();
     checkTower();
     checkHalloween();
-  }, reglages.verifieMs);
+  });
   // Le site redessine le bandeau du combat à chaque tour, ce qui efface nos interrupteurs : les remonter dès la
-  // mutation, avant le prochain affichage, pour qu'ils ne clignotent pas (l'intervalle ci-dessus reste en secours).
+  // mutation, avant le prochain affichage, pour qu'ils ne clignotent pas (le battement ci-dessus reste en secours).
   new MutationObserver(() => mountToggles()).observe(document.body, { childList: true, subtree: true });
   window.yuroPlus = {
     version: YURO_VERSION,
@@ -471,6 +589,12 @@
       }
       repaintToggle("hw", reglages.halloween);
       return reglages.halloween ? "Rejouer auto (Halloween) activé : à la victoire, « Affronter à nouveau » est cliqué" : "Rejouer auto (Halloween) coupé";
+    },
+    // yuroPlus.arrierePlan(false) : ne plus maintenir le jeu éveillé quand l'onglet est caché (mémorisé)
+    arrierePlan(on = true) {
+      fond.actif = Boolean(on);
+      writeSetting("fondActif", fond.actif);
+      return fond.actif ? "arrière-plan maintenu : le jeu continue quand l’onglet est caché" : "arrière-plan coupé : le navigateur gèlera le jeu quand l’onglet est caché";
     },
     // yuroPlus.relanceRapide(false) : plus de clic immédiat, seulement le secours après 12 s (mémorisé)
     relanceRapide(on = true) {
