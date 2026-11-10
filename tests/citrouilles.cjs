@@ -49,8 +49,10 @@ function etape(nom) {
  montre($('#packCards'), nom === 'recap');
  montre($('#packSummaryPager'), nom === 'recap');
  montre($('#skipPackReview'), nom === 'defile');
- if (nom === 'ferme') $('#packDialog').removeAttribute('open');
- else $('#packDialog').setAttribute('open', '');
+ // comme le vrai site : refermé, le dialogue garde son attribut « open » mais est simplement caché
+ // (le démarrage depuis la boutique doit marcher malgré ça)
+ montre($('#packDialog'), nom !== 'ferme');
+ $('#packDialog').setAttribute('open', '');
 }
 window.__recap = (indice) => {
  courant = indice; pageCourante = 0;

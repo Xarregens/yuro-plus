@@ -431,6 +431,15 @@
     const dialog = document.querySelector("#packDialog[open]");
     return dialog?.querySelector("#tearPack.hw26-pack") ? dialog : null;
   }
+  // …et il peut garder son attribut « open » tout en étant caché une fois refermé : vu depuis la boutique, une
+  // ouverture n'est « en cours » que si l'une de ses étapes est réellement affichée (sinon le premier « Ouvrir ×N »
+  // ne partirait jamais — bogue du démarrage depuis la boutique en 0.9.0)
+  function hw26DialogAffiche() {
+    const dialog = hw26Dialog();
+    if (!dialog) return null;
+    const enCours = ["#tearPack", "#skipPackReview", "#openAnotherPack", "#keepCards"].some((selecteur) => visible(dialog.querySelector(selecteur)));
+    return enCours ? dialog : null;
+  }
   let tirage = null; // lecture du récapitulatif en cours (une par ouverture)
   function litTuiles(dialog) {
     for (const tuile of dialog.querySelectorAll("#packCards .reveal-card.pack-summary-tile")) {
@@ -510,7 +519,7 @@
   // boutique (dialogue fermé) : cliquer « Ouvrir ×N » avec la quantité que le joueur a choisie
   const checkOuvrir = createWatcher({
     trouve: () => {
-      if (!reglages.citrouilles || hw26Dialog()) return null;
+      if (!reglages.citrouilles || hw26DialogAffiche()) return null;
       const bouton = document.querySelector("button.hw26-open-main");
       if (!visible(bouton)) return null;
       return patiente("boutique", bouton, "« Ouvrir » est resté désactivé (plus assez de bonbons ?)");

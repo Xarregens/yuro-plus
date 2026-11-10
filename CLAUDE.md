@@ -39,16 +39,20 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
 - Boutique Halloween `#hw26` (enregistrements du 10/11/2026) : quantité `[data-hw26-qty]` ×1/×5/×10 (plafond du site :
   10) + stepper `[data-hw26-step]`, « Ouvrir ×N » `button.hw26-open-main` (débite N × 100 bonbons, le tirage se joue
   côté client : pas de requête dédiée, c'est `PUT /api/save` qui enregistre). S'ouvre alors `dialog#packDialog`
-  (partagé avec les boosters classiques : n'agir que si `#tearPack` porte la classe `hw26-pack`) : citrouille
+  (partagé avec les boosters classiques : n'agir que si `#tearPack` porte la classe `hw26-pack` ; ATTENTION, refermé
+  il garde son attribut `open` en restant caché — une ouverture n'est « en cours » que si une étape est réellement
+  visible, sinon le démarrage depuis la boutique ne part jamais, bogue de la 0.9.0) : citrouille
   `#tearPack` « OUVRE ! » → défilé carte par carte, sauté par `#skipPackReview` « Tout passer » → récapitulatif :
   tuiles `.reveal-card.pack-summary-tile` dans `#packCards` (nom `.summary-card-top strong`, code de rareté
   `.summary-card-top span` : C/R/SR/SSR/UR/LR/TRS, numéro `.summary-card-art span`, série `.summary-card-series`,
   étiquette `.summary-copy-tag` ; triées plus rares en premier, 10 par page, pager `#packSummaryPager
   [data-summary-page]`), pastilles de comptage `.qol-pack-recap` dans `#revealHint` (« 10 citrouilles · 50 cartes »),
   barre `.pack-actions` avec `#openAnotherPack` « Ouvrir encore ×N » qui reboucle sur la citrouille. La meilleure
-  carte (tuile `big-pull-hidden`) porte déjà nom et rareté dans la page : pas besoin de la retourner. « Citrouilles
+  carte (tuile `big-pull-hidden`, classe `revealed` une fois retournée) doit être révélée d'un clic — le joueur le
+  fait à chaque fois, le script aussi, et c'est là que nom et rareté deviennent sûrs dans la page. « Citrouilles
   auto » enchaîne ces clics ; le journal des UR/LR/EX/TRS (`yuro-plus:cartes-rares`, plafonné à 300) est alimenté même
-  en ouverture manuelle ; arrêt automatique quand le site désactive l'ouverture (plus de bonbons). Vitesse : la chaîne
+  en ouverture manuelle ; arrêt automatique quand le site laisse l'ouverture désactivée plus de `patienceMs` (8 s :
+  une désactivation brève pendant une animation ne compte pas). Vitesse : la chaîne
   bat sur son propre ticker 100 ms avec le délai `citrouillesMs` (100 ms, au lieu de `rapideMs`), et le « mode
   éclair » (`eclair`, mémorisé sous `citrouillesEclair`) raccourcit à 1 ms animations/transitions dans `#packDialog`
   seulement, pendant la séance seulement (jamais 0 ms : animationend/transitionend doivent continuer d'arriver au
