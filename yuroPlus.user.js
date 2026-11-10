@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.2.0
+// @version      0.3.0
 // @description  Compagnon pour yurocollection.fr : relance le « replay auto » du mode farm quand un combat ne repart pas tout seul ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.2.0";
+  const YURO_VERSION = "0.3.0";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -207,12 +207,18 @@
   };
   const writeSetting = (name, value) => localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...readSettings(), [name]: value }));
   const reglages = {
-    // au-delà de cette attente sur l'écran de fin (replay auto activé), le combat est considéré bloqué
+    // relance rapide : dès que l'écran de fin apparaît (replay auto activé), « Recommencer » est cliqué après ce court
+    // délai, sans attendre la relance plus lente du site
+    rapideMs: 600,
+    // relance rapide coupée (yuroPlus.relanceRapide(false)) : on n'intervient qu'au-delà de cette attente, en secours
     attenteMs: 12e3,
+    // après un clic, temps laissé au site pour réagir avant de considérer le clic sans effet et de réessayer
+    reessaiMs: 5e3,
     // après ce nombre de clics sans effet sur le même écran, on arrête d'insister
     essaisMax: 3,
-    verifieMs: 1e3,
-    active: readSettings().relanceAuto !== false
+    verifieMs: 250,
+    active: readSettings().relanceAuto !== false,
+    rapide: readSettings().relanceRapide !== false
   };
   const END_SCREEN = "section.story-end-screen.farm-end";
   const RESTART = "[data-farm-start]";
@@ -231,7 +237,8 @@
     toasts.append(item);
     setTimeout(() => item.remove(), 6e3);
   }
-  let stuckSince = null;
+  let endSince = null;
+  let lastClickAt = 0;
   let attempts = 0;
   let announcedGiveUp = false;
   function checkFarm() {
@@ -239,14 +246,16 @@
     const endScreen = document.querySelector(END_SCREEN);
     const autoOn = document.querySelector(AUTO_ON);
     if (!visible(endScreen) || !visible(autoOn)) {
-      stuckSince = null;
+      endSince = null;
       attempts = 0;
       announcedGiveUp = false;
       return;
     }
     const now = Date.now();
-    stuckSince ??= now;
-    if (now - stuckSince < reglages.attenteMs) return;
+    endSince ??= now;
+    // premier clic : vite (relance rapide) ou en secours (attenteMs) ; les suivants : après reessaiMs, si l'écran est toujours là
+    const due = attempts === 0 ? endSince + (reglages.rapide ? reglages.rapideMs : reglages.attenteMs) : lastClickAt + reglages.reessaiMs;
+    if (now < due) return;
     if (attempts >= reglages.essaisMax) {
       if (!announcedGiveUp) {
         announcedGiveUp = true;
@@ -257,9 +266,10 @@
     const restart = endScreen.querySelector(RESTART);
     if (!visible(restart) || restart.disabled) return;
     attempts++;
-    window.yuroPlus.relances++;
-    stuckSince = now;
-    toast(`Yuro Plus : replay auto resté bloqué ${Math.round(reglages.attenteMs / 1e3)} s, combat relancé.`);
+    lastClickAt = now;
+    if (attempts === 1) window.yuroPlus.relances++;
+    // la relance rapide tourne à chaque combat : pas de message, sauf quand un clic est resté sans effet
+    if (!reglages.rapide || attempts > 1) toast(`Yuro Plus : combat relancé (${attempts > 1 ? `clic précédent sans effet, essai ${attempts}` : `replay auto resté bloqué ${Math.round(reglages.attenteMs / 1e3)} s`}).`);
     restart.click();
   }
   setInterval(checkFarm, reglages.verifieMs);
@@ -267,11 +277,17 @@
     version: YURO_VERSION,
     relances: 0,
     reglages,
-    // yuroPlus.relanceAuto(false) coupe la relance (mémorisé), yuroPlus.relanceAuto(true) la remet
+    // yuroPlus.relanceAuto(false) coupe toute relance (mémorisé), yuroPlus.relanceAuto(true) la remet
     relanceAuto(on = true) {
       reglages.active = Boolean(on);
       writeSetting("relanceAuto", reglages.active);
       return reglages.active ? "relance automatique activée" : "relance automatique coupée";
+    },
+    // yuroPlus.relanceRapide(false) : plus de clic immédiat, seulement le secours après 12 s (mémorisé)
+    relanceRapide(on = true) {
+      reglages.rapide = Boolean(on);
+      writeSetting("relanceRapide", reglages.rapide);
+      return reglages.rapide ? "relance rapide activée : « Recommencer » est cliqué dès la fin du combat" : "relance rapide coupée : le site relance lui-même, le script n’intervient qu’après 12 s de blocage";
     }
   };
 })();

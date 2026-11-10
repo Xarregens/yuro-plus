@@ -1,5 +1,11 @@
 # Changelog — Yuro Plus
 
+## 0.3.0
+- Relance rapide, activée par défaut : quand « Replay auto » est sur ON, « ↻ Recommencer » est cliqué dès la fin du
+  combat (0,6 s), sans attendre la relance plus lente du site, et sans message à chaque fois. Un clic resté sans effet
+  est retenté, puis le script s'arrête après 3 essais en le disant. `yuroPlus.relanceRapide(false)` revient au
+  comportement d'avant : le site relance lui-même, le script n'intervient qu'après 12 s de blocage (mémorisé).
+
 ## 0.2.0
 - La relance est là : en mode farm, si l'écran de fin de combat reste affiché plus de 12 s alors que « Replay auto »
   est activé, le script clique « ↻ Recommencer » à ta place, avec un petit message. Il réessaie au besoin, puis

@@ -6,5 +6,5 @@ Lancer depuis ce dossier : `node yuro.cjs ../yuroPlus.user.js`
 
 | Script | Ce qu'il vérifie |
 | --- | --- |
-| `farm.cjs` | Relance du replay auto : clic « Recommencer » après le délai, rien si toggle OFF / replay normal / relance coupée, arrêt après 3 clics sans effet. |
+| `farm.cjs` | Relance du farm : clic immédiat par défaut (sans message), retentatives puis arrêt, mode secours 12 s (`relanceRapide(false)`), rien si toggle OFF ou relance coupée, réglages mémorisés. |
 | `yuro.cjs` | Commandes `yuroDiag` : requêtes notées en continu (masquage des e-mails et clés sensibles), enregistrement des clics et mutations, photo immédiate, WebSocket notée, téléchargement. |

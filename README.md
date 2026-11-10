@@ -1,9 +1,9 @@
 # Yuro Plus
 
 Userscript pour [yurocollection.fr](https://yurocollection.fr) (Tampermonkey / Violentmonkey), par Xarregens.
-En mode farm, quand « Replay auto » est activé mais que le combat ne repart pas tout seul, le script clique
-« ↻ Recommencer » au bout de 12 secondes, comme tu l'aurais fait. Il ne touche à rien d'autre : toggle éteint,
-replay normal ou combat en cours, il ne fait rien.
+En mode farm, quand « Replay auto » est activé, le script clique « ↻ Recommencer » dès la fin du combat, comme tu
+l'aurais fait, au lieu d'attendre la relance plus lente du site, et rattrape ainsi aussi les combats qui ne repartent
+pas tout seuls. Il ne touche à rien d'autre : toggle éteint ou combat en cours, il ne fait rien.
 
 ## Installation
 
@@ -22,6 +22,7 @@ Les mises à jour sont automatiques (menu Tampermonkey → *Vérifier les mises 
 | `yuroDiag.menu(60)` | Enregistre en plus les clics et changements de page pendant 60 s. |
 | `yuroDiag.download()` | Sauvegarde le tout dans un fichier (e-mails et clés sensibles masqués). |
 | `yuroPlus.relanceAuto(false)` | Coupe la relance automatique (mémorisé) ; `yuroPlus.relanceAuto(true)` la remet. |
+| `yuroPlus.relanceRapide(false)` | Plus de clic immédiat : le site relance lui-même, le script n'intervient qu'après 12 s de blocage (mémorisé). |
 | `yuroPlus.relances` | Nombre de combats relancés depuis le chargement de la page. |
 
 ## Historique des versions
