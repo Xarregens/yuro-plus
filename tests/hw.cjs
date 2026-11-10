@@ -53,12 +53,20 @@ let variant = 'won';
   await page.waitForTimeout(800);
   out.compact = await page.evaluate(() => window.__clics);
   await page.evaluate(() => yuroPlus.halloweenAuto(false));
+  // 5. le site redessine le bandeau (changement de tour) : le bouton revient aussitôt, sans attendre l'intervalle,
+  // avec son état, et sans s'empiler
+  variant = 'won';
+  await boot();
+  await page.evaluate(() => { yuroPlus.reglages.verifieMs = 1e9; });
+  await page.evaluate(() => { const h = document.querySelector('header'); const our = h.querySelector('[data-yuro-auto="hw"]')?.parentElement; our?.remove(); h.querySelector('.story-round').textContent = 'TOUR 9'; });
+  await page.waitForTimeout(150);
+  out.redessine = await page.evaluate(() => ({ boutons: document.querySelectorAll('[data-yuro-auto="hw"]').length, texte: document.querySelector('[data-yuro-auto="hw"]')?.textContent ?? 'absent' }));
   out.errors = errors;
   const ok = out.toggle.texte === '⟳ Rejouer autoOFF' && out.toggle.pasDeSuivantAuto
     && out.eteint.play === 0
     && out.allume.play === 1 && out.allume.pumpkin === 0 && out.allume.back === 0 && out.allume.compteur === 1 && out.allume.texte === '⟳ Rejouer autoON'
     && out.memorise === true && out.defaite.play === 0
-    && out.compact.play === 0 && errors.length === 0;
+    && out.compact.play === 0 && out.redessine.boutons === 1 && out.redessine.texte === '⟳ Rejouer autoOFF' && errors.length === 0;
   console.log(JSON.stringify(out, null, 1));
   console.log(ok ? 'PASS' : 'FAIL');
   await browser.close();

@@ -1,5 +1,9 @@
 # Changelog — Yuro Plus
 
+## 0.5.1
+- Les boutons « Rejouer auto » et « Suivant auto » ne clignotent plus à chaque tour de combat : le site redessine son
+  bandeau à chaque tour, le script remet maintenant ses boutons immédiatement, avant l'affichage suivant.
+
 ## 0.5.0
 - Halloween : nouveau bouton « ⟳ Rejouer auto » dans le bandeau (ajouté par le script, **éteint par défaut**, mémorisé).
   Allumé, il clique « ↻ Affronter à nouveau » dès la victoire — jamais « Ouvrir une citrouille », jamais après une

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.5.0
+// @version      0.5.1
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini (chambre suivante lancée à la victoire) ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.5.0";
+  const YURO_VERSION = "0.5.1";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -374,6 +374,9 @@
     checkTower();
     checkHalloween();
   }, reglages.verifieMs);
+  // Le site redessine le bandeau du combat à chaque tour, ce qui efface nos interrupteurs : les remonter dès la
+  // mutation, avant le prochain affichage, pour qu'ils ne clignotent pas (l'intervalle ci-dessus reste en secours).
+  new MutationObserver(() => mountToggles()).observe(document.body, { childList: true, subtree: true });
   window.yuroPlus = {
     version: YURO_VERSION,
     relances: 0,
