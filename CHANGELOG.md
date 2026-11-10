@@ -1,5 +1,11 @@
 # Changelog — Yuro Plus
 
+## 0.7.1
+- Correctif du 0.7.0 : après un passage de l'onglet en arrière-plan, même bref, les combats pouvaient rester figés
+  (« ils se regardent »). Une animation ou une minuterie prise en charge pendant que l'onglet était caché n'était plus
+  rejouée une fois l'onglet redevenu visible, et la boucle du combat mourait là. Tout ce qui est mis de côté est
+  maintenant rejoué dans tous les cas.
+
 ## 0.7.0
 - Le jeu continue quand l'onglet n'est pas visible (couvert par une autre fenêtre ou réduit). Le navigateur gèle
   normalement les animations et ralentit les horloges d'un onglet caché, ce qui figeait les combats et les relances.

@@ -13,8 +13,9 @@ const script = fs.readFileSync(process.argv[2], 'utf8');
   await page.goto('https://yurocollection.fr/#combat');
   // l'onglet se déclare caché (comme couvert par une autre fenêtre) : les lectures « réelles » du script le verront
   await page.evaluate(() => {
-    Object.defineProperty(Document.prototype, 'hidden', { configurable: true, get: () => true });
-    Object.defineProperty(Document.prototype, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    window.__cache = true;
+    Object.defineProperty(Document.prototype, 'hidden', { configurable: true, get: () => window.__cache });
+    Object.defineProperty(Document.prototype, 'visibilityState', { configurable: true, get: () => window.__cache ? 'hidden' : 'visible' });
   });
   await page.addScriptTag({ content: script });
   const out = {};
@@ -40,6 +41,18 @@ const script = fs.readFileSync(process.argv[2], 'utf8');
     requestAnimationFrame(function loop() { if (++frames >= 3) return resolve(frames); requestAnimationFrame(loop); });
   }));
   // 4. coupé : le site revoit la réalité, l'écouteur reçoit l'événement, réglage mémorisé
+  // 4. le retour au premier plan ne perd rien : minuterie et animation posées onglet caché, onglet rendu visible
+  // avant leur échéance, elles partent quand même (bogue 0.7.0 : combats figés après un passage en arrière-plan)
+  out.retour = await page.evaluate(() => new Promise((resolve) => {
+    const result = { minuterie: false, animation: false };
+    setTimeout(() => { result.minuterie = true; }, 600);
+    requestAnimationFrame(() => { result.animation = true; });
+    setTimeout(() => { window.__cache = false; }, 150); // l'onglet redevient visible avant l'échéance
+    const started = Date.now();
+    const check = () => result.minuterie && result.animation ? resolve(result) : Date.now() - started > 4000 ? resolve(result) : requestAnimationFrame(check);
+    check();
+  }));
+  await page.evaluate(() => { window.__cache = true; }); // l'onglet se re-cache pour la suite
   out.coupeMessage = await page.evaluate(() => yuroPlus.arrierePlan(false));
   out.visibleCoupe = await page.evaluate(() => ({ hidden: document.hidden, state: document.visibilityState }));
   out.evenementCoupe = await page.evaluate(() => new Promise((resolve) => {
@@ -55,6 +68,7 @@ const script = fs.readFileSync(process.argv[2], 'utf8');
     && out.evenement === 0
     && out.minuterie.apresMs >= 350 && out.minuterie.apresMs < 2000
     && out.animation === 3
+    && out.retour.minuterie && out.retour.animation
     && /coupé/.test(out.coupeMessage) && out.visibleCoupe.hidden === true && out.visibleCoupe.state === 'hidden' && out.evenementCoupe === 1
     && out.memorise === false && errors.length === 0;
   console.log(JSON.stringify(out, null, 1));

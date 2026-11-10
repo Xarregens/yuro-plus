@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.7.0
+// @version      0.7.1
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini (chambre suivante lancée à la victoire) ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.7.0";
+  const YURO_VERSION = "0.7.1";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -524,16 +524,22 @@
       timers.delete(id);
       nativeClearInterval(id);
     };
+    // Ce qui a été mis de côté pendant que l'onglet était caché est TOUJOURS rejoué, même une fois l'onglet redevenu
+    // visible : sinon une animation ou une minuterie prise en charge juste avant le retour resterait en rade et la
+    // boucle du combat mourrait là (bogue de la 0.7.0, combats figés « ils se regardent »).
     tick.add(() => {
-      if (!fond.actif || !isHidden()) return;
       if (rafQueue.size) {
         const callbacks = [...rafQueue.values()];
         rafQueue.clear();
-        const stamp = performance.now();
-        for (const callback of callbacks) {
-          try {
-            callback(stamp);
-          } catch {}
+        if (isHidden()) {
+          const stamp = performance.now();
+          for (const callback of callbacks) {
+            try {
+              callback(stamp);
+            } catch {}
+          }
+        } else {
+          for (const callback of callbacks) nativeRaf(callback);
         }
       }
       const now = Date.now();
