@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.3.0
-// @description  Compagnon pour yurocollection.fr : relance le « replay auto » du mode farm quand un combat ne repart pas tout seul ; commandes d'enregistrement yuroDiag.
+// @version      0.4.0
+// @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini (chambre suivante lancée à la victoire) ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
 // @supportURL   https://github.com/xarregens/yuro-plus/issues
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.3.0";
+  const YURO_VERSION = "0.4.0";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -218,7 +218,9 @@
     essaisMax: 3,
     verifieMs: 250,
     active: readSettings().relanceAuto !== false,
-    rapide: readSettings().relanceRapide !== false
+    rapide: readSettings().relanceRapide !== false,
+    // Château de l'infini : à la victoire, lancer la chambre suivante (bouton « Suivant auto » du bandeau)
+    suivant: readSettings().suivantAuto !== false
   };
   const END_SCREEN = "section.story-end-screen.farm-end";
   const RESTART = "[data-farm-start]";
@@ -237,51 +239,122 @@
     toasts.append(item);
     setTimeout(() => item.remove(), 6e3);
   }
-  let endSince = null;
-  let lastClickAt = 0;
-  let attempts = 0;
-  let announcedGiveUp = false;
-  function checkFarm() {
-    if (!reglages.active) return;
-    const endScreen = document.querySelector(END_SCREEN);
-    const autoOn = document.querySelector(AUTO_ON);
-    if (!visible(endScreen) || !visible(autoOn)) {
-      endSince = null;
-      attempts = 0;
-      announcedGiveUp = false;
-      return;
-    }
-    const now = Date.now();
-    endSince ??= now;
-    // premier clic : vite (relance rapide) ou en secours (attenteMs) ; les suivants : après reessaiMs, si l'écran est toujours là
-    const due = attempts === 0 ? endSince + (reglages.rapide ? reglages.rapideMs : reglages.attenteMs) : lastClickAt + reglages.reessaiMs;
-    if (now < due) return;
-    if (attempts >= reglages.essaisMax) {
-      if (!announcedGiveUp) {
-        announcedGiveUp = true;
-        toast(`Yuro Plus : ${reglages.essaisMax} relances sans effet, j’arrête d’insister. yuroDiag.page() dans la console pour m’envoyer ce que voit le script.`);
+  // Un surveillant d'écran de fin : premier clic rapide (ou en secours après attenteMs si la relance rapide est
+  // coupée), nouvel essai après reessaiMs si l'écran est toujours là, arrêt après essaisMax clics sans effet.
+  function createWatcher({ trouve, nomAction, raisonLente, compte }) {
+    let since = null;
+    let lastClickAt = 0;
+    let attempts = 0;
+    let announced = false;
+    return () => {
+      if (!reglages.active) return;
+      const target = trouve();
+      if (!target) {
+        since = null;
+        attempts = 0;
+        announced = false;
+        return;
       }
-      return;
-    }
-    const restart = endScreen.querySelector(RESTART);
-    if (!visible(restart) || restart.disabled) return;
-    attempts++;
-    lastClickAt = now;
-    if (attempts === 1) window.yuroPlus.relances++;
-    // la relance rapide tourne à chaque combat : pas de message, sauf quand un clic est resté sans effet
-    if (!reglages.rapide || attempts > 1) toast(`Yuro Plus : combat relancé (${attempts > 1 ? `clic précédent sans effet, essai ${attempts}` : `replay auto resté bloqué ${Math.round(reglages.attenteMs / 1e3)} s`}).`);
-    restart.click();
+      const now = Date.now();
+      since ??= now;
+      const due = attempts === 0 ? since + (reglages.rapide ? reglages.rapideMs : reglages.attenteMs) : lastClickAt + reglages.reessaiMs;
+      if (now < due) return;
+      if (attempts >= reglages.essaisMax) {
+        if (!announced) {
+          announced = true;
+          toast(`Yuro Plus : ${reglages.essaisMax} relances sans effet, j’arrête d’insister. yuroDiag.page() dans la console pour m’envoyer ce que voit le script.`);
+        }
+        return;
+      }
+      attempts++;
+      lastClickAt = now;
+      if (attempts === 1) compte();
+      // en mode rapide, le clic accompagne chaque combat : pas de message, sauf quand un clic est resté sans effet
+      if (!reglages.rapide || attempts > 1) toast(`Yuro Plus : ${nomAction} (${attempts > 1 ? `clic précédent sans effet, essai ${attempts}` : raisonLente}).`);
+      target.click();
+    };
   }
-  setInterval(checkFarm, reglages.verifieMs);
+  // Mode farm : le toggle « Replay auto » est celui du site
+  const checkFarm = createWatcher({
+    trouve: () => {
+      const endScreen = document.querySelector(END_SCREEN);
+      const autoOn = document.querySelector(AUTO_ON);
+      if (!visible(endScreen) || !visible(autoOn)) return null;
+      const restart = endScreen.querySelector(RESTART);
+      return visible(restart) && !restart.disabled ? restart : null;
+    },
+    nomAction: "combat relancé",
+    raisonLente: `replay auto resté bloqué ${Math.round(reglages.attenteMs / 1e3)} s`,
+    compte: () => window.yuroPlus.relances++
+  });
+  // Château de l'infini (enregistrements du 10/11/2026) : écran de fin section.story-end-screen won/lost, boutons
+  // [data-infinity-replay] « Rejouer », [data-infinity-start] « Suivant » (désactivé par le site à la défaite),
+  // [data-infinity-lobby] « Retour au château ». Pas de toggle du site pour ce mode : le script ajoute le sien,
+  // « ⟳ Suivant auto », dans le bandeau du combat. Double garde : classe won ET bouton Suivant non désactivé.
+  const checkTower = createWatcher({
+    trouve: () => {
+      if (!reglages.suivant) return null;
+      const next = document.querySelector("section.story-end-screen.won button[data-infinity-start]");
+      return next && !next.disabled && visible(next) ? next : null;
+    },
+    nomAction: "chambre suivante lancée",
+    raisonLente: "écran de victoire resté affiché",
+    compte: () => window.yuroPlus.suivantes++
+  });
+  // le bouton « Suivant auto », même habillage que le « Replay auto » du site, dans le bandeau du combat du château
+  function mountTowerToggle() {
+    const quit = document.querySelector("header button[data-infinity-lobby]");
+    const header = quit?.closest("header");
+    if (!header || header.querySelector('[data-yuro-auto="next"]')) return;
+    const state = document.createElement("em");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("data-yuro-auto", "next");
+    button.title = "Ajouté par Yuro Plus : à la victoire, la chambre suivante se lance toute seule";
+    const paint = () => {
+      button.className = `btn ghost small combat-auto-btn${reglages.suivant ? " is-on" : ""}`;
+      button.setAttribute("aria-pressed", String(reglages.suivant));
+      state.textContent = reglages.suivant ? "ON" : "OFF";
+    };
+    button.append("⟳ Suivant auto", state);
+    button.addEventListener("click", () => {
+      reglages.suivant = !reglages.suivant;
+      writeSetting("suivantAuto", reglages.suivant);
+      paint();
+    });
+    paint();
+    const group = document.createElement("span");
+    group.className = "combat-auto-group";
+    group.append(button);
+    header.append(group);
+  }
+  setInterval(() => {
+    mountTowerToggle();
+    checkFarm();
+    checkTower();
+  }, reglages.verifieMs);
   window.yuroPlus = {
     version: YURO_VERSION,
     relances: 0,
+    suivantes: 0,
     reglages,
     // yuroPlus.relanceAuto(false) coupe toute relance (mémorisé), yuroPlus.relanceAuto(true) la remet
     relanceAuto(on = true) {
       reglages.active = Boolean(on);
       writeSetting("relanceAuto", reglages.active);
       return reglages.active ? "relance automatique activée" : "relance automatique coupée";
+    },
+    // yuroPlus.suivantAuto(false) : dans le château, ne plus lancer la chambre suivante (même effet que le bouton du bandeau)
+    suivantAuto(on = true) {
+      reglages.suivant = Boolean(on);
+      writeSetting("suivantAuto", reglages.suivant);
+      const mounted = document.querySelector('[data-yuro-auto="next"]');
+      if (mounted) {
+        mounted.classList.toggle("is-on", reglages.suivant);
+        mounted.setAttribute("aria-pressed", String(reglages.suivant));
+        mounted.querySelector("em").textContent = reglages.suivant ? "ON" : "OFF";
+      }
+      return reglages.suivant ? "Suivant auto activé : à la victoire, la chambre suivante se lance toute seule" : "Suivant auto coupé";
     },
     // yuroPlus.relanceRapide(false) : plus de clic immédiat, seulement le secours après 12 s (mémorisé)
     relanceRapide(on = true) {

@@ -1,5 +1,12 @@
 # Changelog — Yuro Plus
 
+## 0.4.0
+- Château de l'infini : nouveau bouton « ⟳ Suivant auto » dans le bandeau du combat (ajouté par le script, mémorisé,
+  activé par défaut). À la victoire, la chambre suivante se lance toute seule ; jamais après une défaite (l'écran
+  doit dire victoire et le bouton « Suivant » du site être actif). Mêmes garde-fous que le farm : nouvel essai si un
+  clic reste sans effet, arrêt après 3 essais. `yuroPlus.suivantAuto(false)` en console a le même effet que le bouton,
+  `yuroPlus.suivantes` compte les chambres lancées.
+
 ## 0.3.0
 - Relance rapide, activée par défaut : quand « Replay auto » est sur ON, « ↻ Recommencer » est cliqué dès la fin du
   combat (0,6 s), sans attendre la relance plus lente du site, et sans message à chaque fois. Un clic resté sans effet

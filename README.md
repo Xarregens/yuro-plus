@@ -5,6 +5,9 @@ En mode farm, quand « Replay auto » est activé, le script clique « ↻ Recom
 l'aurais fait, au lieu d'attendre la relance plus lente du site, et rattrape ainsi aussi les combats qui ne repartent
 pas tout seuls. Il ne touche à rien d'autre : toggle éteint ou combat en cours, il ne fait rien.
 
+Dans le **Château de l'infini**, un bouton « ⟳ Suivant auto » (ajouté par le script dans le bandeau du combat) lance la
+chambre suivante dès la victoire ; jamais après une défaite.
+
 ## Installation
 
 1. Installer l'extension Tampermonkey.
@@ -23,6 +26,7 @@ Les mises à jour sont automatiques (menu Tampermonkey → *Vérifier les mises 
 | `yuroDiag.download()` | Sauvegarde le tout dans un fichier (e-mails et clés sensibles masqués). |
 | `yuroPlus.relanceAuto(false)` | Coupe la relance automatique (mémorisé) ; `yuroPlus.relanceAuto(true)` la remet. |
 | `yuroPlus.relanceRapide(false)` | Plus de clic immédiat : le site relance lui-même, le script n'intervient qu'après 12 s de blocage (mémorisé). |
+| `yuroPlus.suivantAuto(false)` | Château de l'infini : ne plus lancer la chambre suivante (même effet que le bouton du bandeau). |
 | `yuroPlus.relances` | Nombre de combats relancés depuis le chargement de la page. |
 
 ## Historique des versions
