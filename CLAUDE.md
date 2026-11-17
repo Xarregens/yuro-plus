@@ -81,9 +81,13 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   [data-market-sell-rarity]` (Toutes/Commun/Rare/Épique/Légendaire/Mythique/Secret = C…LR), 24 cartes à la fois puis
   « Afficher plus de cartes » `[data-market-more]` (aucune requête : la collection est déjà dans la page), panneau de la
   carte choisie `.mkx-chosen` (« 2 exemplaires · 1 sera réservé »), formulaire `#marketSellForm` (ne jamais y toucher).
+  Onglet actif lisible sur `section.market-page[data-mkx="sell"|"buy"|…]` : Acheter / Échanges ont AUSSI des puces
+  de rareté et un `[data-market-more]`, n'agir que sous `data-mkx="sell"` (`zoneVente`, bogue de la 0.10.0).
   Puce « 双 Doublons » du script (`majDoublons`, réglage `doublons` mémorisé sous `marcheDoublons`) : masque les ×1 par
   une feuille de style + attribut `data-yuro-filtre-doublons` sur `<html>` (survit aux redessins), et clique « Afficher
-  plus » jusqu'au bout (`chargeDoublons`, arrêt après 3 clics sans nouvelle carte).
+  plus » jusqu'au bout (`chargeDoublons` : plusieurs clics d'affilée tant que le site ajoute les cartes aussitôt, 120 ms
+  max par battement ; arrêt après 3 clics sans nouvelle carte). Anti-clignotement (0.10.1) : une seule puce gardée
+  pour la séance et remise en place telle quelle, sans animation ni transition, chiffres à largeur fixe.
 - Combats après les modifs du site (17/11/2026) : apparition de `POST /api/save/combat` `{op:"hold"|"release",
   kind:"raid"}` (verrou de raid). Écrans de fin farm/château/Halloween non recapturés depuis : à vérifier si le
   propriétaire signale un bouton du script qui ne marche plus.

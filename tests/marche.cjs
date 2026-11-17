@@ -1,22 +1,40 @@
 // Marché, onglet Vendre : puce « Doublons » montée après les puces de rareté du site (éteinte par défaut) ; allumée,
-// elle masque les cartes à ×1, clique « Afficher plus de cartes » jusqu'au bout pour faire apparaître les doublons des
-// pages suivantes, compte les doublons ; survit au redessin des puces et de la grille par le site ; mémorisée ;
-// ne touche à rien d'autre (ni sélection de carte, ni puces du site, ni vente).
+// elle masque les cartes à ×1, clique « Afficher plus de cartes » jusqu'au bout — vite : 300 cartes en moins d'une
+// seconde — pour faire apparaître les doublons des pages suivantes, compte les doublons ; survit au redessin des puces
+// et de la grille par le site sans jamais disparaître d'une image à l'autre (pas de clignotement) ; absente des
+// onglets Acheter / Échanges, où rien n'est cliqué ; mémorisée ; ne touche à rien d'autre (ni sélection de carte,
+// ni puces du site, ni vente).
 const { chromium } = require('playwright');
 const fs = require('fs');
 const script = fs.readFileSync(process.argv[2], 'utf8');
 const PAGE = `<!doctype html><html><body><main>
-<div class="mkx-sell" id="marketWorkspace"><section class="mkx-panel mkx-pick"><p class="mkx-sub">60 cartes vendables</p>
+<section class="market-page mkx" data-mkx="sell"><nav class="market-tabs"><button type="button" data-market-tab="buy">Acheter</button><button type="button" data-market-tab="sell" class="active">Vendre</button></nav>
+<div class="mkx-sell" id="marketWorkspace"><section class="mkx-panel mkx-pick"><p class="mkx-sub">300 cartes vendables</p>
 <div id="chipsHost"></div><div id="gridHost"></div>
 <button type="button" class="mkx-btn is-ghost mkx-more-btn" data-market-more="">Afficher plus de cartes</button></section>
-<aside><form id="marketSellForm"><button type="submit" id="publier">Publier l’annonce</button></form></aside></div>
+<aside><form id="marketSellForm"><button type="submit" id="publier">Publier l’annonce</button></form></aside></div></section>
 </main><script>
-// 60 cartes : doublons aux rangs 1, 30, 45 et 59 (donc 3 d'entre eux hors des 24 premières), une ×3
-const cartes = Array.from({ length: 60 }, (_, i) => ({ id: 1000 + i, nom: 'Carte ' + i, n: [1, 30, 45].includes(i) ? 2 : i === 59 ? 3 : 1, rar: i % 2 ? 'Épique' : 'Rare' }));
-let montrees = 24, filtre = 'Toutes';
-window.__clics = { plus: 0, puceSite: 0, carte: 0, publier: 0 };
+// 300 cartes : doublons aux rangs 1, 30, 45, 59 (×3), 150 et 299 — la plupart bien au-delà des 24 premières
+const DOUBLONS = { 1: 2, 30: 2, 45: 2, 59: 3, 150: 2, 299: 2 };
+const cartes = Array.from({ length: 300 }, (_, i) => ({ id: 1000 + i, nom: 'Carte ' + i, n: DOUBLONS[i] ?? 1, rar: i % 2 ? 'Épique' : 'Rare' }));
+let montrees = 24, filtre = 'Toutes', onglet = 'sell';
+window.__clics = { plus: 0, plusAchat: 0, puceSite: 0, carte: 0, publier: 0 };
+// clignotement : à chaque image affichée, la puce Yuro Plus est-elle là ? (compté seulement une fois allumée)
+window.__imagesSansPuce = 0;
+requestAnimationFrame(function image() {
+  if (window.__surveille && onglet === 'sell' && !document.querySelector('.mkx-chips [data-yuro-doublons]')) window.__imagesSansPuce++;
+  requestAnimationFrame(image);
+});
 const tuile = (c) => '<button type="button" class="mkx-own" data-market-sell="' + c.id + '"><span class="mkx-own-art"><img alt=""><em>×' + c.n + '</em><span class="mkx-rar">SR</span></span><span class="mkx-own-copy"><strong>' + c.nom + '</strong><small>cote 500</small></span></button>';
 function rendu() {
+  document.querySelector('section.market-page').dataset.mkx = onglet;
+  if (onglet === 'buy') {
+    // l'onglet Acheter a lui aussi des puces de rareté et un « Afficher plus », mais pas de grille .mkx-own-grid
+    document.getElementById('chipsHost').innerHTML = '<div class="mkx-chips" role="group"><button type="button" class="mkx-chip active" data-market-buy-rarity="Toutes"><span>Toutes</span></button></div>';
+    document.getElementById('gridHost').innerHTML = '<div class="mkx-offers"><article class="mkx-offer">Offre</article></div>';
+    document.querySelector('[data-market-more]').style.display = '';
+    return;
+  }
   // comme le vrai site : puces et grille entièrement redessinées à chaque changement
   document.getElementById('chipsHost').innerHTML = '<div class="mkx-chips" role="group">' + ['Toutes', 'Rare', 'Épique'].map((r) => '<button type="button" class="mkx-chip' + (r === filtre ? ' active' : '') + '" data-market-sell-rarity="' + r + '"><span>' + r + '</span></button>').join('') + '</div>';
   const liste = cartes.filter((c) => filtre === 'Toutes' || c.rar === filtre);
@@ -24,7 +42,9 @@ function rendu() {
   document.querySelector('[data-market-more]').style.display = montrees >= liste.length ? 'none' : '';
 }
 document.addEventListener('click', (e) => {
-  if (e.target.closest('[data-market-more]')) { window.__clics.plus++; montrees += 24; rendu(); }
+  if (e.target.closest('[data-market-more]')) { if (onglet === 'buy') { window.__clics.plusAchat++; return; } window.__clics.plus++; montrees += 24; rendu(); }
+  const tab = e.target.closest('[data-market-tab]');
+  if (tab) { onglet = tab.dataset.marketTab; montrees = 24; rendu(); }
   const puce = e.target.closest('#chipsHost [data-market-sell-rarity]');
   if (puce) { window.__clics.puceSite++; filtre = puce.dataset.marketSellRarity; montrees = 24; rendu(); }
   if (e.target.closest('.mkx-own')) window.__clics.carte++;
@@ -50,18 +70,38 @@ rendu();
   await boot();
   await page.waitForTimeout(600);
   out.eteinte = { puce: await puce(), visibles: (await visibles()).length, clics: await page.evaluate(() => ({ ...window.__clics })) };
-  // 2. allumée : la liste se charge jusqu'au bout, seuls les 4 doublons restent visibles, compteur à 4
+  // 2. allumée : la liste se charge jusqu'au bout, vite, seuls les 6 doublons restent visibles, compteur à 6, et la
+  // puce (toujours le même bouton, sans animation) n'a manqué à aucune image pendant les redessins du site
+  await page.evaluate(() => { window.__puceRef = document.querySelector('.mkx-chips [data-yuro-doublons]'); window.__surveille = true; });
+  const depart = Date.now();
   await page.click('.mkx-chips [data-yuro-doublons]');
-  await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-market-more]')).display === 'none', null, { timeout: 8000 }).catch(() => {});
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-market-more]')).display === 'none', null, { timeout: 15000, polling: 20 }).catch(() => {});
+  const dureeMs = Date.now() - depart;
   await page.waitForTimeout(500);
-  out.allumee = { puce: await puce(), visibles: await visibles(), clics: await page.evaluate(() => ({ ...window.__clics })) };
+  out.allumee = {
+    dureeMs,
+    puce: await puce(),
+    visibles: await visibles(),
+    clics: await page.evaluate(() => ({ ...window.__clics })),
+    memeBouton: await page.evaluate(() => document.querySelector('.mkx-chips [data-yuro-doublons]') === window.__puceRef),
+    sansAnimation: await page.evaluate(() => { const st = getComputedStyle(document.querySelector('.mkx-chips [data-yuro-doublons]')); return st.animationName === 'none' && st.transitionDuration === '0s'; }),
+    imagesSansPuce: await page.evaluate(() => window.__imagesSansPuce)
+  };
   // 3. le joueur choisit une rareté : le site redessine puces et grille ; notre puce revient, toujours allumée,
-  // et la nouvelle liste (Épique : cartes impaires, doublons 1, 45 et 59) se recharge jusqu'au bout
+  // et la nouvelle liste (Épique : cartes impaires, doublons 1, 45, 59 et 299) se recharge jusqu'au bout
   await page.click('#chipsHost [data-market-sell-rarity="Épique"]');
   await page.waitForTimeout(300);
   await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-market-more]')).display === 'none', null, { timeout: 8000 }).catch(() => {});
   await page.waitForTimeout(500);
   out.rarete = { puce: await puce(), visibles: await visibles(), nbPuces: await page.evaluate(() => document.querySelectorAll('.mkx-chips [data-yuro-doublons]').length) };
+  // 3 bis. onglet Acheter (puces de rareté et « Afficher plus » à lui) : pas de puce, aucun clic, filtre inactif
+  await page.click('[data-market-tab="buy"]');
+  await page.waitForTimeout(1200);
+  out.achat = await page.evaluate(() => ({ puces: document.querySelectorAll('[data-yuro-doublons]').length, plusAchat: window.__clics.plusAchat, filtre: document.documentElement.hasAttribute('data-yuro-filtre-doublons') }));
+  await page.click('[data-market-tab="sell"]');
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-market-more]')).display === 'none', null, { timeout: 8000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  out.retourVente = { puce: await puce(), visibles: (await visibles()).length };
   // 4. mémorisée au rechargement
   await boot();
   await page.waitForTimeout(1500);
@@ -72,9 +112,12 @@ rendu();
   out.reeteinte = { active: (await puce()).active, visibles: (await visibles()).length, memo: await page.evaluate(() => JSON.parse(localStorage.getItem('yuro-plus:settings')).marcheDoublons), clics: await page.evaluate(() => ({ ...window.__clics })) };
   out.errors = errors;
   const ok = out.eteinte.puce.texte === '双Doublons' && !out.eteinte.puce.active && out.eteinte.puce.apresSite && out.eteinte.visibles === 24 && out.eteinte.clics.plus === 0
-    && out.allumee.puce.active && out.allumee.puce.texte === '双Doublons · 4' && JSON.stringify(out.allumee.visibles) === JSON.stringify(['Carte 1', 'Carte 30', 'Carte 45', 'Carte 59']) && out.allumee.clics.plus === 2
-    && out.rarete.nbPuces === 1 && out.rarete.puce.active && out.rarete.puce.apresSite && JSON.stringify(out.rarete.visibles) === JSON.stringify(['Carte 1', 'Carte 45', 'Carte 59'])
-    && out.memorisee.active && out.memorisee.visibles === 4
+    && out.allumee.puce.active && out.allumee.puce.texte === '双Doublons · 6' && JSON.stringify(out.allumee.visibles) === JSON.stringify(['Carte 1', 'Carte 30', 'Carte 45', 'Carte 59', 'Carte 150', 'Carte 299']) && out.allumee.clics.plus === 12
+    && out.allumee.dureeMs < 1000 && out.allumee.memeBouton && out.allumee.sansAnimation && out.allumee.imagesSansPuce === 0
+    && out.rarete.nbPuces === 1 && out.rarete.puce.active && out.rarete.puce.apresSite && JSON.stringify(out.rarete.visibles) === JSON.stringify(['Carte 1', 'Carte 45', 'Carte 59', 'Carte 299'])
+    && out.achat.puces === 0 && out.achat.plusAchat === 0 && !out.achat.filtre
+    && out.retourVente.puce.active && out.retourVente.visibles === 4
+    && out.memorisee.active && out.memorisee.visibles === 6
     && !out.reeteinte.active && out.reeteinte.visibles > 4 && out.reeteinte.memo === false
     && out.reeteinte.clics.carte === 0 && out.reeteinte.clics.publier === 0
     && errors.length === 0;

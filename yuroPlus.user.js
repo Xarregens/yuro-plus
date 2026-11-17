@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.10.0
+// @version      0.10.1
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini, « Citrouilles auto » et journal des cartes rares en Halloween, filtre « Doublons » au marché ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.10.0";
+  const YURO_VERSION = "0.10.1";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -753,44 +753,86 @@
   // Notre puce, à la suite de celles du site : allumée, les cartes à ×1 sont masquées (une feuille de style, attribut
   // sur <html> pour survivre aux redessins de la grille) et « Afficher plus » est cliqué jusqu'au bout pour que
   // tous les doublons apparaissent. Elle ne touche à rien d'autre (ni vente, ni prix).
+  // Uniquement dans l'onglet Vendre : la page du marché porte section.market-page[data-mkx="sell"] (les onglets
+  // Acheter / Échanges ont aussi des puces de rareté et un « Afficher plus », qu'il ne faut pas toucher).
   const DOUBLONS_CSS = "html[data-yuro-filtre-doublons] .mkx-own-grid .mkx-own:not([data-yuro-doublon]) { display: none !important; }";
-  function marqueDoublons() {
+  function zoneVente() {
+    const page = document.querySelector('section.market-page[data-mkx="sell"]');
+    const grille = page?.querySelector(".mkx-own-grid");
+    if (!grille) return null;
+    return { page, grille, chips: page.querySelector(".mkx-pick .mkx-chips") ?? page.querySelector(".mkx-chips"), plus: page.querySelector("[data-market-more]") };
+  }
+  // la marque data-yuro-ex retient le texte de la pastille : on n'écrit dans la page que si elle a changé (le site
+  // peut réutiliser une case pour une autre carte), ce qui garde le passage sur un millier de cartes très léger
+  function marqueDoublons(grille) {
     let doublons = 0;
-    for (const tuile of document.querySelectorAll(".mkx-own-grid .mkx-own")) {
-      const nombre = parseInt((tuile.querySelector(".mkx-own-art em")?.textContent ?? "").replace(/[^0-9]/g, ""), 10) || 0;
-      const doublon = nombre >= 2;
+    for (const tuile of grille.querySelectorAll(".mkx-own")) {
+      const pastille = tuile.querySelector(".mkx-own-art em")?.textContent ?? "";
+      const doublon = (parseInt(pastille.replace(/[^0-9]/g, ""), 10) || 0) >= 2;
       if (doublon) doublons++;
-      if (doublon !== tuile.hasAttribute("data-yuro-doublon")) tuile.toggleAttribute("data-yuro-doublon", doublon);
+      if (tuile.getAttribute("data-yuro-ex") === pastille) continue;
+      tuile.setAttribute("data-yuro-ex", pastille);
+      tuile.toggleAttribute("data-yuro-doublon", doublon);
     }
     return doublons;
   }
-  const chargement = { dernierClic: 0, tuilesAuClic: -1, sansProgres: 0 };
-  // « Afficher plus » cliqué tant que la puce est allumée et que chaque clic ajoute des cartes (3 clics sans rien de
-  // nouveau : on arrête, c'est la fin de la liste ou le site a changé)
+  const chargement = { tuilesAuClic: -1, dernierClic: 0, sansProgres: 0 };
+  // « Afficher plus » cliqué tant que la puce est allumée : plusieurs fois d'affilée tant que le site ajoute les
+  // cartes aussitôt (dans la limite de 120 ms par battement, pour que la page reste fluide), sinon au battement
+  // suivant ; 3 clics sans nouvelle carte : fin de la liste (ou le site a changé), on arrête.
   function chargeDoublons() {
     if (!reglages.doublons) return;
-    const plus = document.querySelector("#marketWorkspace [data-market-more]");
-    if (!plus || !visible(plus) || plus.disabled) {
+    const zone = zoneVente();
+    const plusVisible = () => zone && visible(zone.plus) && !zone.plus.disabled;
+    if (!plusVisible()) {
       chargement.sansProgres = 0;
       chargement.tuilesAuClic = -1;
       return;
     }
-    const maintenant = Date.now();
-    if (maintenant - chargement.dernierClic < 150) return;
-    const tuiles = document.querySelectorAll(".mkx-own-grid .mkx-own").length;
-    if (tuiles === chargement.tuilesAuClic) {
-      if (maintenant - chargement.dernierClic < 1500) return; // le site n'a pas encore ajouté les cartes
-      if (++chargement.sansProgres >= 3) return;
-    } else {
-      chargement.sansProgres = 0;
+    const debut = performance.now();
+    while (plusVisible() && chargement.sansProgres < 3 && performance.now() - debut < 120) {
+      const tuiles = zone.page.querySelectorAll(".mkx-own-grid .mkx-own").length;
+      if (tuiles === chargement.tuilesAuClic) {
+        if (Date.now() - chargement.dernierClic < 1500) return; // cartes pas encore ajoutées : on attend
+        chargement.sansProgres++;
+      } else {
+        chargement.sansProgres = 0;
+      }
+      chargement.tuilesAuClic = tuiles;
+      chargement.dernierClic = Date.now();
+      zone.plus.click();
+      if (zone.page.querySelectorAll(".mkx-own-grid .mkx-own").length === tuiles) return; // ajout différé par le site
     }
-    chargement.dernierClic = maintenant;
-    chargement.tuilesAuClic = tuiles;
-    plus.click();
+  }
+  // une seule puce pour toute la séance : remise en place telle quelle si le site redessine ses puces, sans animation
+  // d'apparition, largeur du compteur fixe — sinon elle clignotait à chaque nouveau doublon
+  let puceDoublons = null;
+  function creePuceDoublons() {
+    const puce = document.createElement("button");
+    puce.type = "button";
+    puce.className = "mkx-chip";
+    puce.setAttribute("data-yuro-doublons", "");
+    puce.setAttribute("data-rarity-plain", "");
+    puce.style.cssText = "--r:#7ee0a8;animation:none!important;transition:none!important;font-variant-numeric:tabular-nums;";
+    puce.title = "Ajouté par Yuro Plus : ne montrer que les cartes que tu possèdes en 2 exemplaires ou plus (le site garde toujours ton dernier exemplaire). Charge toute la liste automatiquement. Combinable avec les raretés, l’univers et la recherche.";
+    const kanji = document.createElement("b");
+    kanji.lang = "ja";
+    kanji.setAttribute("aria-hidden", "true");
+    kanji.textContent = "双";
+    puce.append(kanji, document.createElement("span"));
+    puce.addEventListener("click", (event) => {
+      event.stopPropagation(); // la puce n'est pas une rareté : le site n'a pas à la voir
+      reglages.doublons = !reglages.doublons;
+      writeSetting("marcheDoublons", reglages.doublons);
+      chargement.sansProgres = 0;
+      chargement.tuilesAuClic = -1;
+      majDoublons();
+    });
+    return puce;
   }
   function majDoublons() {
-    const surMarche = Boolean(document.querySelector("#marketWorkspace .mkx-own-grid"));
-    const actif = reglages.doublons && surMarche;
+    const zone = zoneVente();
+    const actif = reglages.doublons && Boolean(zone);
     if (actif !== document.documentElement.hasAttribute("data-yuro-filtre-doublons")) document.documentElement.toggleAttribute("data-yuro-filtre-doublons", actif);
     if (actif && !document.getElementById("yuro-plus-doublons-css")) {
       const style = document.createElement("style");
@@ -798,41 +840,24 @@
       style.textContent = DOUBLONS_CSS;
       document.head.append(style);
     }
-    const chips = document.querySelector("#marketWorkspace .mkx-chips");
-    if (!chips) return;
-    const doublons = marqueDoublons();
-    let puce = chips.querySelector("[data-yuro-doublons]");
-    if (!puce) {
+    // hors de l'onglet Vendre : pas de puce
+    for (const egaree of document.querySelectorAll("[data-yuro-doublons]")) {
+      if (!zone?.chips || egaree.parentElement !== zone.chips) egaree.remove();
+    }
+    if (!zone?.chips) return;
+    const doublons = marqueDoublons(zone.grille);
+    puceDoublons ??= creePuceDoublons();
+    if (puceDoublons.parentElement !== zone.chips) {
       stats.remontages++;
       totalCreations++;
-      puce = document.createElement("button");
-      puce.type = "button";
-      puce.className = "mkx-chip";
-      puce.setAttribute("data-yuro-doublons", "");
-      puce.setAttribute("data-rarity-plain", "");
-      puce.style.setProperty("--r", "#7ee0a8");
-      puce.title = "Ajouté par Yuro Plus : ne montrer que les cartes que tu possèdes en 2 exemplaires ou plus (le site garde toujours ton dernier exemplaire). Charge toute la liste automatiquement. Combinable avec les raretés, l’univers et la recherche.";
-      const kanji = document.createElement("b");
-      kanji.lang = "ja";
-      kanji.setAttribute("aria-hidden", "true");
-      kanji.textContent = "双";
-      puce.append(kanji, document.createElement("span"));
-      puce.addEventListener("click", (event) => {
-        event.stopPropagation(); // la puce n'est pas une rareté : le site n'a pas à la voir
-        reglages.doublons = !reglages.doublons;
-        writeSetting("marcheDoublons", reglages.doublons);
-        chargement.sansProgres = 0;
-        chargement.tuilesAuClic = -1;
-        majDoublons();
-      });
-      chips.append(puce);
+      zone.chips.append(puceDoublons);
     }
-    const chargeEncore = actif && chargement.sansProgres < 3 && visible(document.querySelector("#marketWorkspace [data-market-more]"));
+    const chargeEncore = actif && chargement.sansProgres < 3 && visible(zone.plus) && !zone.plus.disabled;
     const texte = reglages.doublons ? `Doublons · ${doublons}${chargeEncore ? "…" : ""}` : "Doublons";
-    const libelle = puce.querySelector("span");
+    const libelle = puceDoublons.querySelector("span");
     if (libelle.textContent !== texte) libelle.textContent = texte;
-    if (puce.classList.contains("active") !== reglages.doublons) puce.classList.toggle("active", reglages.doublons);
-    if (puce.getAttribute("aria-pressed") !== String(reglages.doublons)) puce.setAttribute("aria-pressed", String(reglages.doublons));
+    if (puceDoublons.classList.contains("active") !== reglages.doublons) puceDoublons.classList.toggle("active", reglages.doublons);
+    if (puceDoublons.getAttribute("aria-pressed") !== String(reglages.doublons)) puceDoublons.setAttribute("aria-pressed", String(reglages.doublons));
   }
 
   // nos interrupteurs dans le bandeau du combat, même habillage que le « Replay auto » du site
