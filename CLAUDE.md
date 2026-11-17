@@ -4,14 +4,14 @@ Un seul programme : `yuroPlus.user.js`, userscript Tampermonkey pour le jeu yuro
 (Xarregens) n'est pas développeur : parler simplement, livrer des versions complètes, tester avant d'envoyer, ne jamais
 toucher au vrai site autrement qu'en lecture. Même façon de travailler que le dépôt frère `kyara-plus` (Kyara Plus).
 
-- Ce que fait le script (0.9.x) : relance immédiate du replay auto en farm (`createWatcher`), « Suivant auto » dans le
+- Ce que fait le script (0.10.x) : relance immédiate du replay auto en farm (`createWatcher`), « Suivant auto » dans le
   Château de l'infini et « Rejouer auto » en Halloween (interrupteurs du script montés dans le bandeau par
   `mountToggle`, remontés sur mutation pour ne pas clignoter), série V · D · bonbons en Halloween, « Citrouilles
   auto » + journal des cartes rares dans la boutique Halloween (panneau « ✦ Rares » sur le site, ouvert tout seul en
   fin de séance), et maintien du jeu quand l'onglet est caché (`installFond`). Réglages dans l'objet `reglages`,
   mémorisés sous `yuro-plus:settings` (sauf `citrouilles`, jamais mémorisé) ; commandes console `yuroPlus.*`
   (relanceAuto, relanceRapide, suivantAuto, halloweenAuto, citrouillesAuto, citrouillesEclair, cartesRares,
-  arrierePlan).
+  doublons, arrierePlan). Au marché (Vendre), puce « Doublons ».
 - Toute connaissance du site vient des enregistrements `yuroDiag` (page(), menu(), download()) fournis par le
   propriétaire : pour un écran inconnu ou un bogue, demander un `yuroDiag.page()` pris au bon moment avant de coder.
   Le script ne clique que les boutons que le joueur cliquerait, jamais ceux qui dépensent, et ne forge aucune requête.
@@ -75,10 +75,17 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   recréés en 1 s par l'observateur de mutations → remontage sur mutation suspendu 5 s (si le site retire tout élément
   étranger de son bandeau, sans frein la page se fige : vérifié par `tests/boite.cjs`) ; (3) journal des requêtes en un
   seul passage, rien au-delà de 2 Mo. Prochaine étape : analyser une boîte noire réelle.
-- Marché `#market` (onglet « Vendre », capture d'écran du 17/11/2026, DOM encore inconnu) : demande d'un bouton « ne
-  voir que les doublons » dans la grille « Choisis la carte » (tuiles avec badge de rareté et pastille « ×N », filtres
-  Toutes/C/R/SR/SSR/UR/LR). « ×N » = nombre d'exemplaires possédés (confirmé par le propriétaire le 17/11/2026) :
-  doublon = ×2 ou plus. Attendre un `yuroDiag.page()` sur cet onglet (fichier `yuro-diag-*.json` ; le 17/11 il a
-  envoyé par erreur un `kyara-dialog-*.json` de Kyara Plus, autre site) avant de coder.
+- Marché `#market`, onglet « Vendre » (yuroDiag du 17/11/2026) : `#marketWorkspace`, grille `.mkx-own-grid` de
+  `button.mkx-own[data-market-sell=id]` (nom `.mkx-own-copy strong`, pastille `.mkx-own-art em` « ×N » = exemplaires
+  possédés, confirmé ; le site réserve le dernier exemplaire, donc doublon = ×2+), puces de rareté `.mkx-chips
+  [data-market-sell-rarity]` (Toutes/Commun/Rare/Épique/Légendaire/Mythique/Secret = C…LR), 24 cartes à la fois puis
+  « Afficher plus de cartes » `[data-market-more]` (aucune requête : la collection est déjà dans la page), panneau de la
+  carte choisie `.mkx-chosen` (« 2 exemplaires · 1 sera réservé »), formulaire `#marketSellForm` (ne jamais y toucher).
+  Puce « 双 Doublons » du script (`majDoublons`, réglage `doublons` mémorisé sous `marcheDoublons`) : masque les ×1 par
+  une feuille de style + attribut `data-yuro-filtre-doublons` sur `<html>` (survit aux redessins), et clique « Afficher
+  plus » jusqu'au bout (`chargeDoublons`, arrêt après 3 clics sans nouvelle carte).
+- Combats après les modifs du site (17/11/2026) : apparition de `POST /api/save/combat` `{op:"hold"|"release",
+  kind:"raid"}` (verrou de raid). Écrans de fin farm/château/Halloween non recapturés depuis : à vérifier si le
+  propriétaire signale un bouton du script qui ne marche plus.
 - Le script note en permanence (mémoire glissante) les requêtes fetch/XHR du site et sa WebSocket, e-mails et clés
   sensibles masqués ; ne jamais enregistrer de jeton en clair dans un fichier téléchargé.

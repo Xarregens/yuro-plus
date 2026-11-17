@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.9.2
-// @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini, « Citrouilles auto » et journal des cartes rares en Halloween ; commandes d'enregistrement yuroDiag.
+// @version      0.10.0
+// @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini, « Citrouilles auto » et journal des cartes rares en Halloween, filtre « Doublons » au marché ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
 // @supportURL   https://github.com/xarregens/yuro-plus/issues
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.9.2";
+  const YURO_VERSION = "0.10.0";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -229,6 +229,8 @@
     // Halloween : à la victoire, cliquer « Affronter à nouveau » (notre bouton « Rejouer auto », éteint par défaut :
     // le site a son propre Replay auto pour ce mode ; le nôtre sert quand celui du site est éteint)
     halloween: readSettings().halloweenAuto === true,
+    // Marché, onglet Vendre : ne montrer que les cartes possédées en 2 exemplaires ou plus (puce « Doublons »)
+    doublons: readSettings().marcheDoublons === true,
     // Boutique Halloween : ouvrir les citrouilles en boucle (« Citrouilles auto »). Chaque ouverture DÉPENSE des
     // bonbons : jamais mémorisé, toujours éteint au chargement, le joueur rallume à chaque séance en connaissance
     // de cause. C'est la seule exception à « jamais les boutons qui dépensent », voulue par le propriétaire.
@@ -742,6 +744,97 @@
     }
   };
 
+  // ---- Marché, onglet « Vendre » : puce « Doublons » ----
+  // Observé (yuroDiag du 17/11/2026, page #market) : grille .mkx-own-grid de button.mkx-own[data-market-sell=id],
+  // pastille <em>×N</em> = exemplaires possédés (confirmé par le propriétaire), puces de rareté
+  // .mkx-chips [data-market-sell-rarity], 24 cartes affichées à la fois et « Afficher plus de cartes »
+  // [data-market-more] pour la suite — sans requête au serveur, la collection est déjà dans la page. Le site réserve
+  // le dernier exemplaire : seules les cartes à ×2 ou plus se vendent sans perdre la carte.
+  // Notre puce, à la suite de celles du site : allumée, les cartes à ×1 sont masquées (une feuille de style, attribut
+  // sur <html> pour survivre aux redessins de la grille) et « Afficher plus » est cliqué jusqu'au bout pour que
+  // tous les doublons apparaissent. Elle ne touche à rien d'autre (ni vente, ni prix).
+  const DOUBLONS_CSS = "html[data-yuro-filtre-doublons] .mkx-own-grid .mkx-own:not([data-yuro-doublon]) { display: none !important; }";
+  function marqueDoublons() {
+    let doublons = 0;
+    for (const tuile of document.querySelectorAll(".mkx-own-grid .mkx-own")) {
+      const nombre = parseInt((tuile.querySelector(".mkx-own-art em")?.textContent ?? "").replace(/[^0-9]/g, ""), 10) || 0;
+      const doublon = nombre >= 2;
+      if (doublon) doublons++;
+      if (doublon !== tuile.hasAttribute("data-yuro-doublon")) tuile.toggleAttribute("data-yuro-doublon", doublon);
+    }
+    return doublons;
+  }
+  const chargement = { dernierClic: 0, tuilesAuClic: -1, sansProgres: 0 };
+  // « Afficher plus » cliqué tant que la puce est allumée et que chaque clic ajoute des cartes (3 clics sans rien de
+  // nouveau : on arrête, c'est la fin de la liste ou le site a changé)
+  function chargeDoublons() {
+    if (!reglages.doublons) return;
+    const plus = document.querySelector("#marketWorkspace [data-market-more]");
+    if (!plus || !visible(plus) || plus.disabled) {
+      chargement.sansProgres = 0;
+      chargement.tuilesAuClic = -1;
+      return;
+    }
+    const maintenant = Date.now();
+    if (maintenant - chargement.dernierClic < 150) return;
+    const tuiles = document.querySelectorAll(".mkx-own-grid .mkx-own").length;
+    if (tuiles === chargement.tuilesAuClic) {
+      if (maintenant - chargement.dernierClic < 1500) return; // le site n'a pas encore ajouté les cartes
+      if (++chargement.sansProgres >= 3) return;
+    } else {
+      chargement.sansProgres = 0;
+    }
+    chargement.dernierClic = maintenant;
+    chargement.tuilesAuClic = tuiles;
+    plus.click();
+  }
+  function majDoublons() {
+    const surMarche = Boolean(document.querySelector("#marketWorkspace .mkx-own-grid"));
+    const actif = reglages.doublons && surMarche;
+    if (actif !== document.documentElement.hasAttribute("data-yuro-filtre-doublons")) document.documentElement.toggleAttribute("data-yuro-filtre-doublons", actif);
+    if (actif && !document.getElementById("yuro-plus-doublons-css")) {
+      const style = document.createElement("style");
+      style.id = "yuro-plus-doublons-css";
+      style.textContent = DOUBLONS_CSS;
+      document.head.append(style);
+    }
+    const chips = document.querySelector("#marketWorkspace .mkx-chips");
+    if (!chips) return;
+    const doublons = marqueDoublons();
+    let puce = chips.querySelector("[data-yuro-doublons]");
+    if (!puce) {
+      stats.remontages++;
+      totalCreations++;
+      puce = document.createElement("button");
+      puce.type = "button";
+      puce.className = "mkx-chip";
+      puce.setAttribute("data-yuro-doublons", "");
+      puce.setAttribute("data-rarity-plain", "");
+      puce.style.setProperty("--r", "#7ee0a8");
+      puce.title = "Ajouté par Yuro Plus : ne montrer que les cartes que tu possèdes en 2 exemplaires ou plus (le site garde toujours ton dernier exemplaire). Charge toute la liste automatiquement. Combinable avec les raretés, l’univers et la recherche.";
+      const kanji = document.createElement("b");
+      kanji.lang = "ja";
+      kanji.setAttribute("aria-hidden", "true");
+      kanji.textContent = "双";
+      puce.append(kanji, document.createElement("span"));
+      puce.addEventListener("click", (event) => {
+        event.stopPropagation(); // la puce n'est pas une rareté : le site n'a pas à la voir
+        reglages.doublons = !reglages.doublons;
+        writeSetting("marcheDoublons", reglages.doublons);
+        chargement.sansProgres = 0;
+        chargement.tuilesAuClic = -1;
+        majDoublons();
+      });
+      chips.append(puce);
+    }
+    const chargeEncore = actif && chargement.sansProgres < 3 && visible(document.querySelector("#marketWorkspace [data-market-more]"));
+    const texte = reglages.doublons ? `Doublons · ${doublons}${chargeEncore ? "…" : ""}` : "Doublons";
+    const libelle = puce.querySelector("span");
+    if (libelle.textContent !== texte) libelle.textContent = texte;
+    if (puce.classList.contains("active") !== reglages.doublons) puce.classList.toggle("active", reglages.doublons);
+    if (puce.getAttribute("aria-pressed") !== String(reglages.doublons)) puce.setAttribute("aria-pressed", String(reglages.doublons));
+  }
+
   // nos interrupteurs dans le bandeau du combat, même habillage que le « Replay auto » du site
   // (un même interrupteur peut être monté à deux endroits, ex. boutique + dialogue : tous repeints)
   function repaintToggle(id, on) {
@@ -816,6 +909,7 @@
       mountRaresButton(host?.querySelector(".combat-auto-group"));
     }
     updateCitrouillesBadge();
+    majDoublons();
   }
   // ---- fonctionnement en arrière-plan ----
   // Onglet caché (couvert ou réduit), le navigateur gèle les animations et ralentit les minuteries jusqu'à une par
@@ -1101,6 +1195,8 @@
   // la chaîne citrouilles a son propre battement rapide, actif seulement pendant une séance : réaction en ~100 ms à
   // chaque écran (le battement normal ci-dessus reste en secours et gère le journal des ouvertures manuelles)
   const tickCitrouilles = createTicker(100);
+  // le chargement de la liste du marché profite du même battement rapide
+  tickCitrouilles.add(chargeDoublons);
   tickCitrouilles.add(() => {
     if (!reglages.citrouilles) return;
     litRecapitulatif();
@@ -1159,6 +1255,14 @@
     },
     // yuroPlus.citrouillesEclair(false) : rendre leurs animations au dialogue d'ouverture pendant Citrouilles auto
     // (mémorisé ; par défaut elles sont raccourcies pour aller plus vite)
+    // yuroPlus.doublons(true) : au marché (Vendre), ne montrer que les cartes à 2 exemplaires ou plus (même effet que
+    // la puce « Doublons », mémorisé)
+    doublons(on = true) {
+      reglages.doublons = Boolean(on);
+      writeSetting("marcheDoublons", reglages.doublons);
+      majDoublons();
+      return reglages.doublons ? "marché : seuls les doublons (×2 ou plus) sont affichés" : "marché : toutes les cartes sont affichées";
+    },
     citrouillesEclair(on = true) {
       reglages.eclair = Boolean(on);
       writeSetting("citrouillesEclair", reglages.eclair);
