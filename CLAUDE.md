@@ -77,7 +77,8 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   seul passage, rien au-delà de 2 Mo. Prochaine étape : analyser une boîte noire réelle.
 - Marché `#market` (onglet « Vendre », capture d'écran du 17/11/2026, DOM encore inconnu) : demande d'un bouton « ne
   voir que les doublons » dans la grille « Choisis la carte » (tuiles avec badge de rareté et pastille « ×N », filtres
-  Toutes/C/R/SR/SSR/UR/LR). Attendre un `yuroDiag.page()` sur cet onglet, idéalement avec un doublon sélectionné, pour
-  savoir ce que compte « ×N » (exemplaires possédés ou vendables : le site réserve le dernier exemplaire).
+  Toutes/C/R/SR/SSR/UR/LR). « ×N » = nombre d'exemplaires possédés (confirmé par le propriétaire le 17/11/2026) :
+  doublon = ×2 ou plus. Attendre un `yuroDiag.page()` sur cet onglet (fichier `yuro-diag-*.json` ; le 17/11 il a
+  envoyé par erreur un `kyara-dialog-*.json` de Kyara Plus, autre site) avant de coder.
 - Le script note en permanence (mémoire glissante) les requêtes fetch/XHR du site et sa WebSocket, e-mails et clés
   sensibles masqués ; ne jamais enregistrer de jeton en clair dans un fichier téléchargé.
