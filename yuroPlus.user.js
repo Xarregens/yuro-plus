@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.9.1
+// @version      0.9.2
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini, « Citrouilles auto » et journal des cartes rares en Halloween ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.9.1";
+  const YURO_VERSION = "0.9.2";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -59,10 +59,15 @@
     } catch {
       return;
     }
+    // un seul passage par message (analyse, masquage, mesure) : ce journal tourne en permanence, y compris onglet caché
+    // pendant les combats auto, il doit rester léger. Au-delà de 2 Mo, on note seulement la taille.
     const capped = (value) => {
       if (value == null || typeof value !== "string") return null;
+      if (value.length > 2e6) return `<${value.length} caractères, non noté>`;
       try {
-        return maskJson(JSON.parse(value));
+        const masked = maskJson(JSON.parse(value));
+        const flat = JSON.stringify(masked);
+        return flat.length > LIMITS.body ? flat.slice(0, LIMITS.body) : masked;
       } catch {
         return mask(value).slice(0, LIMITS.body);
       }
@@ -74,7 +79,7 @@
       statut: status,
       dureeMs: Math.round(performance.now() - startedAt),
       requete: capped(requestBody),
-      reponse: text == null ? null : JSON.stringify(capped(text)).length > LIMITS.body ? JSON.stringify(capped(text)).slice(0, LIMITS.body) : capped(text)
+      reponse: capped(text)
     });
   }
   const originalFetch = window.fetch;
@@ -235,6 +240,10 @@
     // un bouton d'ouverture désactivé n'arrête la boucle que s'il le reste aussi longtemps : le site le coupe
     // aussi brièvement pendant ses animations
     patienceMs: 8e3,
+    // onglet caché : temps maximal passé à rejouer animations et minuteries du site en un seul battement
+    budgetMs: 100,
+    // au-delà de ce nombre de boutons recréés en une seconde, on cesse de les remonter sur mutation (voir le frein)
+    remontagesMax: 30,
     // « mode éclair » : pendant que Citrouilles auto tourne, raccourcir les animations du site dans le dialogue
     // d'ouverture (et seulement là). yuroPlus.citrouillesEclair(false) si un écran se comporte mal (mémorisé).
     eclair: readSettings().citrouillesEclair !== false
@@ -742,8 +751,11 @@
       button.querySelector("em").textContent = on ? "ON" : "OFF";
     }
   }
+  let totalCreations = 0;
   function mountToggle({ id, header, label, title, lire, ecrire }) {
     if (!header || header.querySelector(`[data-yuro-auto="${id}"]`)) return;
+    stats.remontages++;
+    totalCreations++;
     const state = document.createElement("em");
     const button = document.createElement("button");
     button.type = "button";
@@ -813,6 +825,123 @@
   // 3. les animations (requestAnimationFrame) et minuteries que le site pose pendant que l'onglet est caché sont
   //    rejouées par le worker, au rythme de verifieMs : invisible de toute façon, et le jeu avance.
   const fond = { actif: readSettings().fondActif !== false };
+  // ---- boîte noire : ce qui s'est passé juste avant que la page se fige ----
+  // Une page figée (calcul sans fin) ne répond plus à rien, pas même à F5 ni à yuroDiag.page() : il faut fermer
+  // l'onglet. Pour savoir quand même ce qui s'est passé, la page envoie chaque seconde un petit état à un worker
+  // séparé, qui continue de tourner pendant le blocage. Sans nouvelles depuis seuilMs alors que lui-même tournait
+  // normalement (pas une mise en veille de l'ordinateur), il écrit ses derniers états en IndexedDB ; si la page
+  // reprend vie, il note l'heure de reprise. Au chargement suivant, un message propose yuroDiag.boiteNoire().
+  const stats = { mutations: 0, remontages: 0, rejeuMs: 0, pireMs: 0, pireNom: "", minuteries: 0, animations: 0 };
+  const BOITE = { base: "yuro-plus", magasin: "boite-noire", cle: "dernier", seuilMs: 8e3 };
+  const boiteNoire = (() => {
+    const code = `
+      let dernier = Date.now(), tour = Date.now(), journal = [], enCours = null, incident = null;
+      const ecrire = (fiche) => {
+        const ouverture = indexedDB.open(${JSON.stringify(BOITE.base)}, 1);
+        ouverture.onupgradeneeded = () => ouverture.result.createObjectStore(${JSON.stringify(BOITE.magasin)});
+        ouverture.onsuccess = () => {
+          const tx = ouverture.result.transaction(${JSON.stringify(BOITE.magasin)}, "readwrite");
+          tx.objectStore(${JSON.stringify(BOITE.magasin)}).put(fiche, ${JSON.stringify(BOITE.cle)});
+          tx.oncomplete = () => ouverture.result.close();
+        };
+      };
+      onmessage = (e) => {
+        if (e.data.genre === "debut") { enCours = e.data.nom; return; }
+        dernier = Date.now();
+        enCours = null;
+        journal.push(e.data.etat);
+        if (journal.length > 60) journal.shift();
+        if (incident) { incident.repriseLe = new Date(dernier).toISOString(); ecrire({ ...incident }); incident = null; }
+      };
+      setInterval(() => {
+        const maintenant = Date.now();
+        if (maintenant - tour > 3000) dernier = maintenant; // le worker était lui-même suspendu (veille) : pas un blocage
+        tour = maintenant;
+        if (incident || !journal.length || maintenant - dernier < ${BOITE.seuilMs}) return;
+        incident = { figeeVueLe: new Date(maintenant).toISOString(), dernierSigneDeVie: new Date(dernier).toISOString(), rappelEnCours: enCours, repriseLe: null, journal: journal.slice() };
+        ecrire({ ...incident });
+      }, 1000);`;
+    let worker = null;
+    try {
+      worker = new Worker(URL.createObjectURL(new Blob([code], { type: "text/javascript" })));
+    } catch {}
+    let dernierEnvoi = 0;
+    const envoie = (message) => {
+      try {
+        worker?.postMessage(message);
+      } catch {}
+    };
+    const lit = () => new Promise((resolve) => {
+      try {
+        const ouverture = indexedDB.open(BOITE.base, 1);
+        ouverture.onupgradeneeded = () => ouverture.result.createObjectStore(BOITE.magasin);
+        ouverture.onerror = () => resolve(null);
+        ouverture.onsuccess = () => {
+          const lecture = ouverture.result.transaction(BOITE.magasin).objectStore(BOITE.magasin).get(BOITE.cle);
+          lecture.onsuccess = () => {
+            ouverture.result.close();
+            resolve(lecture.result ?? null);
+          };
+          lecture.onerror = () => resolve(null);
+        };
+      } catch {
+        resolve(null);
+      }
+    });
+    const marque = (incident) => {
+      try {
+        const ouverture = indexedDB.open(BOITE.base, 1);
+        ouverture.onsuccess = () => {
+          const tx = ouverture.result.transaction(BOITE.magasin, "readwrite");
+          tx.objectStore(BOITE.magasin).put(incident, BOITE.cle);
+          tx.oncomplete = () => ouverture.result.close();
+        };
+      } catch {}
+    };
+    return {
+      // appelé à chaque battement : un état par seconde suffit, petit et sans donnée personnelle
+      battement(cache) {
+        const maintenant = Date.now();
+        if (!worker || maintenant - dernierEnvoi < 1e3) return;
+        dernierEnvoi = maintenant;
+        const derniere = apiLog.at(-1);
+        envoie({ genre: "etat", etat: {
+          t: stamp(),
+          page: location.hash,
+          ongletCache: cache,
+          arrierePlan: fond.actif,
+          ...stats,
+          derniereRequete: derniere ? `${derniere.t} ${derniere.methode} ${derniere.chemin.split("?")[0]} ${derniere.statut}` : null,
+          memoireMo: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null
+        } });
+        stats.mutations = 0;
+        stats.remontages = 0;
+        stats.pireMs = 0;
+        stats.pireNom = "";
+      },
+      // juste avant chaque rappel rejoué onglet caché : si la page se fige dedans, la boîte noire saura lequel
+      debut: (nom) => worker && envoie({ genre: "debut", nom }),
+      lit,
+      // au chargement : prévenir une fois qu'un rapport attend
+      async annonce() {
+        const incident = await lit();
+        if (!incident || incident.annonce) return;
+        toast(`Yuro Plus : la page s’est figée le ${new Date(incident.figeeVueLe).toLocaleString("fr-FR")}${incident.repriseLe ? " (elle a fini par repartir)" : ""}. Tape yuroDiag.boiteNoire() dans la console pour télécharger le rapport et me l’envoyer.`);
+        marque({ ...incident, annonce: true });
+      }
+    };
+  })();
+  // yuroDiag.boiteNoire() : télécharge le rapport du dernier blocage (à lancer dans un NOUVEL onglet après avoir
+  // fermé la page figée)
+  window.yuroDiag.boiteNoire = () => {
+    boiteNoire.lit().then((incident) => {
+      if (!incident) return toast("Yuro Plus : la boîte noire est vide, aucun blocage enregistré.");
+      toast(`Yuro Plus : rapport ${saveJson("yuro-boite-noire", { version: YURO_VERSION, ...incident })} téléchargé, tu peux me l’envoyer.`);
+    });
+    return "lecture de la boîte noire…";
+  };
+  boiteNoire.annonce();
+  const nomRappel = (callback) => (callback.name || String(callback)).replace(/\s+/g, " ").slice(0, 160);
   function createTicker(ms) {
     const listeners = new Set();
     const fire = () => listeners.forEach((listener) => {
@@ -902,30 +1031,55 @@
     // Ce qui a été mis de côté pendant que l'onglet était caché est TOUJOURS rejoué, même une fois l'onglet redevenu
     // visible : sinon une animation ou une minuterie prise en charge juste avant le retour resterait en rade et la
     // boucle du combat mourrait là (bogue de la 0.7.0, combats figés « ils se regardent »).
+    // Budget par battement (budgetMs) : au-delà, le reste attend le battement suivant, pour ne jamais enchaîner des
+    // secondes de calcul d'un bloc. Chaque rappel est chronométré pour la boîte noire.
+    const rejoue = (callback, args, cache) => {
+      const debut = performance.now();
+      if (cache) boiteNoire.debut(nomRappel(callback));
+      try {
+        callback(...args);
+      } catch {}
+      const duree = performance.now() - debut;
+      if (duree > stats.pireMs) {
+        stats.pireMs = Math.round(duree);
+        stats.pireNom = nomRappel(callback);
+      }
+    };
     tick.add(() => {
+      const debut = performance.now();
+      const cache = isHidden();
+      const horsBudget = () => performance.now() - debut > reglages.budgetMs;
       if (rafQueue.size) {
-        const callbacks = [...rafQueue.values()];
+        const entries = [...rafQueue];
         rafQueue.clear();
-        if (isHidden()) {
+        if (cache) {
           const stamp = performance.now();
-          for (const callback of callbacks) {
-            try {
-              callback(stamp);
-            } catch {}
+          const reste = [];
+          for (const [id, callback] of entries) {
+            if (horsBudget()) reste.push([id, callback]);
+            else rejoue(callback, [stamp], true);
+          }
+          if (reste.length) {
+            const nouveaux = [...rafQueue];
+            rafQueue.clear();
+            for (const [id, callback] of [...reste, ...nouveaux]) rafQueue.set(id, callback);
           }
         } else {
-          for (const callback of callbacks) nativeRaf(callback);
+          for (const [, callback] of entries) nativeRaf(callback);
         }
       }
       const now = Date.now();
       for (const [id, timer] of [...timers]) {
         if (timer.at > now) continue;
+        if (horsBudget()) break;
         if (timer.every) timer.at = now + timer.every;
         else timers.delete(id);
-        try {
-          timer.callback(...timer.args);
-        } catch {}
+        rejoue(timer.callback, timer.args, cache);
       }
+      stats.rejeuMs = Math.round(performance.now() - debut);
+      stats.minuteries = timers.size;
+      stats.animations = rafQueue.size;
+      boiteNoire.battement(cache);
     });
   }
   installFond();
@@ -959,7 +1113,23 @@
   });
   // Le site redessine le bandeau du combat à chaque tour, ce qui efface nos interrupteurs : les remonter dès la
   // mutation, avant le prochain affichage, pour qu'ils ne clignotent pas (le battement ci-dessus reste en secours).
-  new MutationObserver(() => mountToggles()).observe(document.body, { childList: true, subtree: true });
+  // Frein : si nos boutons sont recréés plus de remontagesMax fois en une seconde, c'est que le site les retire
+  // aussitôt (il ne veut rien d'étranger dans son bandeau) et qu'on joue au ping-pong avec lui, de quoi figer la
+  // page : on laisse alors le seul battement les remonter pendant 5 s.
+  let fenetreRemontage = 0;
+  let creationsAuDebut = 0;
+  let freinJusqua = 0;
+  new MutationObserver(() => {
+    stats.mutations++;
+    const maintenant = Date.now();
+    if (maintenant < freinJusqua) return;
+    if (maintenant - fenetreRemontage > 1e3) {
+      fenetreRemontage = maintenant;
+      creationsAuDebut = totalCreations;
+    }
+    mountToggles();
+    if (totalCreations - creationsAuDebut > reglages.remontagesMax) freinJusqua = maintenant + 5e3;
+  }).observe(document.body, { childList: true, subtree: true });
   window.yuroPlus = {
     version: YURO_VERSION,
     relances: 0,

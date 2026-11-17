@@ -63,6 +63,21 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
 - Arrière-plan : les vérifications battent dans un Web Worker (créé depuis un blob ; si le site ajoutait une CSP
   worker-src, retomber sur setInterval). `installFond` masque document.hidden/visibilityState, retient
   visibilitychange, et rejoue rAF + setTimeout/setInterval posés pendant que l'onglet est caché (ids ≥ 2e9 pour ne
-  pas croiser les ids natifs). Réglage `fondActif`.
+  pas croiser les ids natifs). Réglage `fondActif`. Rejeu limité à `budgetMs` (100 ms) par battement, le reste
+  attend le suivant.
+- Page figée (signalée le 17/11/2026 après des modifs du site : fenêtre réduite pendant les combats auto, F5 sans
+  effet, il faut un nouvel onglet = calcul sans fin sur le fil principal). Cause non établie. Garde-fous 0.9.2 :
+  (1) boîte noire — la page envoie chaque seconde un petit état (`stats` : mutations, recréations de boutons, durée
+  du rejeu, pire rappel, minuteries/animations en attente, dernière requête, mémoire) à un worker dédié, et le nom de
+  chaque rappel rejoué onglet caché ; sans nouvelles depuis 8 s (et le worker lui-même pas suspendu), il écrit
+  l'incident en IndexedDB `yuro-plus`/`boite-noire`, puis l'heure de reprise ; message au chargement suivant,
+  `yuroDiag.boiteNoire()` télécharge le rapport ; (2) frein anti ping-pong : plus de `remontagesMax` (30) boutons
+  recréés en 1 s par l'observateur de mutations → remontage sur mutation suspendu 5 s (si le site retire tout élément
+  étranger de son bandeau, sans frein la page se fige : vérifié par `tests/boite.cjs`) ; (3) journal des requêtes en un
+  seul passage, rien au-delà de 2 Mo. Prochaine étape : analyser une boîte noire réelle.
+- Marché `#market` (onglet « Vendre », capture d'écran du 17/11/2026, DOM encore inconnu) : demande d'un bouton « ne
+  voir que les doublons » dans la grille « Choisis la carte » (tuiles avec badge de rareté et pastille « ×N », filtres
+  Toutes/C/R/SR/SSR/UR/LR). Attendre un `yuroDiag.page()` sur cet onglet, idéalement avec un doublon sélectionné, pour
+  savoir ce que compte « ×N » (exemplaires possédés ou vendables : le site réserve le dernier exemplaire).
 - Le script note en permanence (mémoire glissante) les requêtes fetch/XHR du site et sa WebSocket, e-mails et clés
   sensibles masqués ; ne jamais enregistrer de jeton en clair dans un fichier téléchargé.
