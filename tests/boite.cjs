@@ -66,6 +66,8 @@ const toasts = (page) => page.evaluate(() => [...document.querySelectorAll('body
     reprise: Boolean(rapport.repriseLe),
     etats: rapport.journal.length,
     sequence: (rapport.derniersRappels ?? []).at(-1),
+    // le code de la fonction en cours est connu dès son lancement : même une fonction qui ne rendrait jamais la main
+    codeEnCours: /while \(Date\.now\(\) < fin\)/.test(rapport.codeEnCours ?? ''),
     long: rapport.rappelsLongs?.[0] && { nom: rapport.rappelsLongs[0].nom, type: rapport.rappelsLongs[0].type, dureeMs: rapport.rappelsLongs[0].dureeMs, code: /while \(Date\.now\(\) < fin\)/.test(rapport.rappelsLongs[0].code) },
     dernierEtat: rapport.journal.at(-1) && { ongletCache: rapport.journal.at(-1).ongletCache, arrierePlan: rapport.journal.at(-1).arrierePlan, page: rapport.journal.at(-1).page }
   };
@@ -92,6 +94,24 @@ const toasts = (page) => page.evaluate(() => [...document.querySelectorAll('body
     etat: rapportRetour.journal.at(-1) && { ongletCache: rapportRetour.journal.at(-1).ongletCache, elements: rapportRetour.journal.at(-1).elements, animationsCss: rapportRetour.journal.at(-1).animationsCss }
   };
   await retour.close();
+
+  // 2 ter. disjoncteur (cas réel du 18/11 12:45) : onglet caché, le jeu devient lent — trois fonctions du site bloquent
+  // chacune plus d'une seconde. Au troisième blocage, l'arrière-plan se met en pause (le site revoit l'onglet caché)
+  // et un message prévient ; deux blocages seulement ne suffisent pas
+  const lent = await nouvellePage();
+  await demarre(lent, true);
+  await lent.waitForTimeout(800);
+  const bloque = () => lent.evaluate(() => { setTimeout(function combatLent() { const fin = Date.now() + 1100; while (Date.now() < fin) {} }, 50); });
+  await bloque(); await lent.waitForTimeout(1800);
+  await bloque(); await lent.waitForTimeout(1800);
+  out.disjoncteurAvant = await lent.evaluate(() => document.hidden);
+  await bloque(); await lent.waitForTimeout(1800);
+  out.disjoncteur = await lent.evaluate(() => ({
+    hidden: document.hidden,
+    message: [...document.querySelectorAll('body > div > div')].some((d) => /mis l’arrière-plan en pause/.test(d.textContent) && /combatLent/.test(d.textContent))
+  }));
+  out.relance = await lent.evaluate(() => { yuroPlus.arrierePlan(true); return document.hidden; });
+  await lent.close();
 
   // 3. au chargement suivant, un message propose le rapport ; une seule fois
   await demarre(page, false);
@@ -123,6 +143,8 @@ const toasts = (page) => page.evaluate(() => [...document.querySelectorAll('body
   const ok = out.fausseAlerte.includes('vide')
     && out.rapport.nom.startsWith('yuro-boite-noire-') && /figeLaPage/.test(out.rapport.rappel ?? '') && out.rapport.figee && out.rapport.reprise
     && out.rapport.sequence?.nom === 'figeLaPage' && out.rapport.sequence?.type === 'minuterie 100 ms'
+    && out.rapport.codeEnCours
+    && out.disjoncteurAvant === false && out.disjoncteur.hidden === true && out.disjoncteur.message && out.relance === false
     && out.rapport.long?.nom === 'figeLaPage' && out.rapport.long.type === 'minuterie 100 ms' && out.rapport.long.dureeMs >= 10000 && out.rapport.long.code
     && out.rapport.etats >= 1 && out.rapport.dernierEtat.ongletCache === true && out.rapport.dernierEtat.arrierePlan === true && out.rapport.dernierEtat.page === '#combat'
     && out.retour.repere && out.retour.reprise && out.retour.mesure?.dureeMs >= 9000

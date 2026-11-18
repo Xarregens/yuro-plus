@@ -91,8 +91,19 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   accumulation ; mesure du navigateur (PerformanceObserver « long-animation-frame », sinon « longtask ») de toute
   image/tâche > 1 s, même hors de notre rejeu : scripts en cause (déclencheur, fonction, fichier, position, part de
   mise en page) et passage de code relu dans le fichier du site (lecture seule, cache) ; l'incident tout juste repris
-  reste ouvert 30 s dans le worker pour recevoir ces mesures qui arrivent après coup. Attendre ce rapport avant de
-  corriger.
+  reste ouvert 30 s dans le worker pour recevoir ces mesures qui arrivent après coup.
+  Deuxième boîte noire (18/11 12:45, encore en 0.10.2) : blocage DÉFINITIF (aucune reprise) PENDANT que l'onglet était
+  caché, dans `scan` (fonction du site lancée par requestAnimationFrame, rejouée par nous). Page bien plus lourde que
+  la 1re fois : mémoire 102–134 Mo (contre 57–70), `scan` 54–109 ms (contre 12–20), `runStoryAuto` 0,6–1,3 s (contre
+  0,1), > 1 s cinq fois dans les 3 min d'avant. Code de `runStoryAuto` lu : le site a désormais SA propre pause onglet
+  inactif (`globalThis.yuroTabInactive` → return) et un `globalThis.yuroMarketBusy` ; il pilote un coup par appel
+  (`performStoryAction`) puis se reprogramme (scheduleStoryAuto). Cause de l'alourdissement non établie (accumulation
+  onglet caché ? les `elements`/`animationsCss` de la 0.10.3 le diront).
+  0.10.4 : (1) code de chaque fonction rejouée envoyé au worker dès son PREMIER lancement (une fonction qui ne rend
+  jamais la main est ainsi décrite : `codeEnCours`, `codesRecents`) ; (2) disjoncteur — `disjoncteurNombre` (3)
+  rappels rejoués onglet caché de plus d'1 s en `disjoncteurFenetreMs` (3 min) → `fond.actif = false` pour cette page
+  (non mémorisé, le navigateur endort le jeu comme sans script, la page reste en vie), message conseillant F5 au
+  retour ; `yuroPlus.arrierePlan(true)` relance. Sur le cas du 18/11 il aurait sauté ~1 min 30 avant la mort.
 - Marché `#market`, onglet « Vendre » (yuroDiag du 17/11/2026) : `#marketWorkspace`, grille `.mkx-own-grid` de
   `button.mkx-own[data-market-sell=id]` (nom `.mkx-own-copy strong`, pastille `.mkx-own-art em` « ×N » = exemplaires
   possédés, confirmé ; le site réserve le dernier exemplaire, donc doublon = ×2+), puces de rareté `.mkx-chips

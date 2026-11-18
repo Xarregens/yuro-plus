@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.10.3
+// @version      0.10.4
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini, « Citrouilles auto » et journal des cartes rares en Halloween, filtre « Doublons » au marché ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.10.3";
+  const YURO_VERSION = "0.10.4";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -244,6 +244,9 @@
     patienceMs: 8e3,
     // onglet caché : temps maximal passé à rejouer animations et minuteries du site en un seul battement
     budgetMs: 100,
+    // disjoncteur de l'arrière-plan : tant de blocages de plus d'une seconde, dans cette fenêtre de temps
+    disjoncteurNombre: 3,
+    disjoncteurFenetreMs: 18e4,
     // au-delà de ce nombre de boutons recréés en une seconde, on cesse de les remonter sur mutation (voir le frein)
     remontagesMax: 30,
     // « mode éclair » : pendant que Citrouilles auto tourne, raccourcir les animations du site dans le dialogue
@@ -950,11 +953,12 @@
   // séparé, qui continue de tourner pendant le blocage. Sans nouvelles depuis seuilMs alors que lui-même tournait
   // normalement (pas une mise en veille de l'ordinateur), il écrit ses derniers états en IndexedDB ; si la page
   // reprend vie, il note l'heure de reprise. Au chargement suivant, un message propose yuroDiag.boiteNoire().
-  const stats = { mutations: 0, remontages: 0, rejeuMs: 0, pireMs: 0, pireNom: "", minuteries: 0, animations: 0 };
+  const stats = { mutations: 0, remontages: 0, rejeuMs: 0, pireMs: 0, pireNom: "", minuteries: 0, animations: 0, disjoncte: false };
   const BOITE = { base: "yuro-plus", magasin: "boite-noire", cle: "dernier", seuilMs: 8e3 };
   const boiteNoire = (() => {
     const code = `
       let dernier = Date.now(), tour = Date.now(), journal = [], enCours = null, incident = null, sequence = [], longs = [], recent = null, recentJusqua = 0;
+      const codes = {};
       const ecrire = (fiche) => {
         const ouverture = indexedDB.open(${JSON.stringify(BOITE.base)}, 1);
         ouverture.onupgradeneeded = () => ouverture.result.createObjectStore(${JSON.stringify(BOITE.magasin)});
@@ -968,6 +972,11 @@
         if (e.data.genre === "debut") {
           enCours = e.data.nom;
           sequence.push({ t: e.data.t, nom: e.data.nom, type: e.data.type });
+          if (e.data.code && !(e.data.nom in codes)) {
+            codes[e.data.nom] = e.data.code;
+            const noms = Object.keys(codes);
+            if (noms.length > 120) delete codes[noms[0]];
+          }
           if (sequence.length > 20) sequence.shift();
           return;
         }
@@ -990,7 +999,7 @@
         if (maintenant - tour > 3000) dernier = maintenant; // le worker était lui-même suspendu (veille) : pas un blocage
         tour = maintenant;
         if (incident || !journal.length || maintenant - dernier < ${BOITE.seuilMs}) return;
-        incident = { figeeVueLe: new Date(maintenant).toISOString(), dernierSigneDeVie: new Date(dernier).toISOString(), rappelEnCours: enCours, derniersRappels: sequence.slice(), rappelsLongs: longs.slice(), repriseLe: null, journal: journal.slice() };
+        incident = { figeeVueLe: new Date(maintenant).toISOString(), dernierSigneDeVie: new Date(dernier).toISOString(), rappelEnCours: enCours, codeEnCours: codes[enCours] ?? null, codesRecents: Object.fromEntries([...new Set(sequence.map((r) => r.nom))].filter((nom) => nom in codes).map((nom) => [nom, codes[nom]])), derniersRappels: sequence.slice(), rappelsLongs: longs.slice(), repriseLe: null, journal: journal.slice() };
         ecrire({ ...incident });
       }, 1000);`;
     let worker = null;
@@ -998,6 +1007,7 @@
       worker = new Worker(URL.createObjectURL(new Blob([code], { type: "text/javascript" })));
     } catch {}
     let dernierEnvoi = 0;
+    const codesEnvoyes = new Set();
     const envoie = (message) => {
       try {
         worker?.postMessage(message);
@@ -1055,7 +1065,15 @@
         stats.pireNom = "";
       },
       // juste avant chaque rappel rejoué onglet caché : si la page se fige dedans, la boîte noire saura lequel
-      debut: (nom, type) => worker && envoie({ genre: "debut", nom, type, t: stamp() }),
+      debut: (nom, type, callback) => {
+        if (!worker) return;
+        let code;
+        if (callback && !codesEnvoyes.has(nom)) {
+          codesEnvoyes.add(nom);
+          code = String(callback).slice(0, 4e3);
+        }
+        envoie({ genre: "debut", nom, type, t: stamp(), code });
+      },
       // un rappel du site qui a bloqué la page plus d'une seconde : son code (celui du site, pas une donnée du joueur)
       // est joint au rapport, pour savoir ce qu'il fait
       long: (rappel) => worker && envoie({ genre: "long", rappel }),
@@ -1219,7 +1237,7 @@
     // secondes de calcul d'un bloc. Chaque rappel est chronométré pour la boîte noire.
     const rejoue = (callback, args, cache, type) => {
       const debut = performance.now();
-      if (cache) boiteNoire.debut(nomRappel(callback), type);
+      if (cache) boiteNoire.debut(nomRappel(callback), type, callback);
       try {
         callback(...args);
       } catch {}
@@ -1230,8 +1248,26 @@
       }
       if (duree > 1e3) {
         boiteNoire.long({ t: stamp(), nom: callback.name || "(anonyme)", type, dureeMs: Math.round(duree), ongletCache: cache, code: String(callback).slice(0, 4e3) });
+        if (cache) disjoncteur(nomRappel(callback));
       }
     };
+    // Disjoncteur (boîte noire du 18/11 12:45 : avant que la page ne meure, le pilote des combats du site passait de
+    // 0,1 s à plus d'1 s par coup, 5 fois en 3 minutes). Au-delà de disjoncteurNombre blocages de plus d'une seconde
+    // en disjoncteurFenetreMs, onglet caché, l'arrière-plan est mis en pause pour cette page : le navigateur reprend la
+    // main et met le jeu en sommeil comme sans le script, la page reste en vie. Pas mémorisé : rechargée, la page repart
+    // avec l'arrière-plan (et allégée) ; yuroPlus.arrierePlan(true) le relance tout de suite.
+    const lents = [];
+    function disjoncteur(nom) {
+      const maintenant = Date.now();
+      lents.push(maintenant);
+      while (lents.length && maintenant - lents[0] > reglages.disjoncteurFenetreMs) lents.shift();
+      if (!fond.actif || lents.length < reglages.disjoncteurNombre) return;
+      fond.actif = false;
+      stats.disjoncte = true;
+      lents.length = 0;
+      boiteNoire.debut("— arrière-plan mis en pause : jeu trop lent —", "disjoncteur");
+      toast(`Yuro Plus : le jeu devenait très lent en arrière-plan (« ${nom.slice(0, 40)} » a bloqué la page plus d’une seconde ${reglages.disjoncteurNombre} fois), signe qu’elle risquait de se figer. J’ai mis l’arrière-plan en pause : recharge la page (F5) en revenant, elle repartira allégée avec l’arrière-plan.`);
+    }
     let dernierCache = isHidden();
     tick.add(() => {
       const debut = performance.now();
