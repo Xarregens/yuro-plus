@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.11.1
+// @version      0.11.2
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini, « Ouverture auto » des boosters gratuits et de quête avec journal des cartes rares, filtre « Doublons » au marché ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.11.1";
+  const YURO_VERSION = "0.11.2";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -529,10 +529,12 @@
     }
     return null;
   }
-  // sources gratuites, d'après les paiements que le site envoie (payment "free" / "quest") et les réserves qu'il
-  // renvoie (freeBoosters, questBoosters, referralBoosters = parrainage). Tout ce qui ressemble à du ki est refusé,
-  // même si un autre indice disait « gratuit ».
-  const SOURCE_GRATUITE = /^(free|quests?|referrals?)$/;
+  // sources gratuites. Vu sur le site (18/11) : « Gratuit » = data-source "free" (bouton data-free-booster),
+  // « Quêtes » / « Récompense de quête » = data-source "reward" (classe is-reward, bouton data-quest-booster, puce
+  // data-bv4-pay="reward"), alors que la requête envoyée dit payment "quest" ; le ki = "ki" (data-buy-booster). Le
+  // parrainage (referralBoosters dans les réponses) n'a pas encore été vu à l'écran : nom deviné. Tout ce qui
+  // ressemble à du ki ou à un achat est refusé, même si un autre indice disait « gratuit ».
+  const SOURCE_GRATUITE = /^(free|rewards?|quests?|referrals?)$/;
   const boutonOuvrir = () => {
     const bouton = document.querySelector("#bv4Open");
     return visible(bouton) ? bouton : null;
@@ -540,8 +542,8 @@
   const sourceGratuite = (bouton) => {
     if (!bouton) return false;
     const source = bouton.dataset.source ?? "";
-    if (/ki/i.test(source) || bouton.classList.contains("is-ki")) return false;
-    return SOURCE_GRATUITE.test(source) || [...bouton.classList].some((classe) => /^is-(free|quests?|referrals?)$/.test(classe));
+    if (/ki/i.test(source) || bouton.classList.contains("is-ki") || bouton.hasAttribute("data-buy-booster")) return false;
+    return SOURCE_GRATUITE.test(source) || [...bouton.classList].some((classe) => /^is-(free|rewards?|quests?|referrals?)$/.test(classe));
   };
   const pucesGratuites = () => [...document.querySelectorAll(".bv4-pay [data-bv4-pay]")].filter((puce) => SOURCE_GRATUITE.test(puce.dataset.bv4Pay ?? "") && visible(puce) && !puce.disabled);
   const puceGratuite = () => pucesGratuites()[0];

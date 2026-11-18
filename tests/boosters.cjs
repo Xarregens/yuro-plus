@@ -24,21 +24,21 @@ const PAGE = `<!doctype html><html><body><main>
 </main><script>
 // Simulation de la boutique : mêmes identifiants, classes et attributs que le vrai site (enregistrements du 18/11/2026)
 const $ = (s) => document.querySelector(s);
-window.__reserve = { free: 2, quest: 8 };
+window.__reserve = { free: 2, reward: 8 };
 let lot = 1, choix = null, tirageNo = -1, pageNo = 0;
 window.__clics = { ouvrir: 0, ki: 0, lot10: 0, puceFree: 0, puceKi: 0, jaquette: 0, rouvrir: 0, tear: 0, skip: 0, pages: 0, encore: 0, keep: 0, retour: 0 };
 window.__achats = [];
-const sourceAuto = () => choix ?? (window.__reserve.free ? 'free' : window.__reserve.quest ? 'quest' : 'ki');
+const sourceAuto = () => choix ?? (window.__reserve.free ? 'free' : window.__reserve.reward ? 'reward' : 'ki');
 // comme le vrai site : la section entière est redessinée (innerHTML) à chaque changement
 function boutique() {
  const src = sourceAuto();
  const dispo = src === 'ki' ? lot : Math.min(lot, window.__reserve[src]);
  const puces = (window.__reserve.free ? '<button type="button" role="radio" class="bv4-chip" data-bv4-pay="free" aria-checked="' + (src === 'free') + '">Gratuit <b>' + window.__reserve.free + '</b></button>' : '')
-  + (window.__reserve.quest ? '<button type="button" role="radio" class="bv4-chip" data-bv4-pay="quest" aria-checked="' + (src === 'quest') + '">Quêtes <b>' + window.__reserve.quest + '</b></button>' : '')
+  + (window.__reserve.reward ? '<button type="button" role="radio" class="bv4-chip" data-bv4-pay="reward" aria-checked="' + (src === 'reward') + '">Quêtes <b>' + window.__reserve.reward + '</b></button>' : '')
   + '<button type="button" role="radio" class="bv4-chip" data-bv4-pay="ki" aria-checked="' + (src === 'ki') + '">Ki</button>';
  $('#boosterPurchase').innerHTML = '<h2 id="purchaseTitle">Ouvrir Multivers</h2><div class="batch-presets bv4-seg">'
   + [1, 5, 10].map((n) => '<button type="button" data-batch-count="' + n + '" aria-pressed="' + (n === lot) + '">×' + n + '</button>').join('') + '</div>'
-  + '<button type="button" class="bv4-open is-' + src + '" id="bv4Open" data-source="' + src + '"' + (src !== 'ki' && !window.__reserve[src] ? ' disabled' : '') + '><span class="bv4-open-main">Ouvrir' + (src === 'ki' ? ' ×' + lot : '') + '</span> <span class="bv4-open-pay">' + (src === 'free' ? 'Gratuit' : src === 'quest' ? 'Récompense de quête' : lot * 100 + ' ki') + '</span></button>'
+  + '<button type="button" class="bv4-open is-' + src + '" id="bv4Open" ' + ({ free: 'data-free-booster', reward: 'data-quest-booster', ki: 'data-buy-booster' })[src] + ' data-source="' + src + '"' + (src !== 'ki' && !window.__reserve[src] ? ' disabled' : '') + '><span class="bv4-open-main">Ouvrir' + (src === 'ki' ? ' ×' + lot : '') + '</span> <span class="bv4-open-pay">' + (src === 'free' ? 'Gratuit' : src === 'reward' ? 'Récompense de quête' : lot * 100 + ' ki') + '</span></button>'
   + '<div class="bv4-pay"><span>Payer avec</span>' + puces + '</div><p class="bv4-note">' + (src !== 'ki' && dispo < lot ? 'Lot ajusté à ta réserve : ' + dispo + ' booster.' : '') + '</p>';
 }
 const front = (code, nom, numero, serie, tag) => '<span class="reveal-front"><span class="summary-card-top"><strong>' + nom + '</strong><span>' + code + '</span></span><span class="summary-card-art"><span>' + numero + '</span></span><span class="summary-card-series">' + serie + '</span></span><span class="summary-copy-tag">' + tag + '</span>';
@@ -164,15 +164,15 @@ boutique();
     && Object.values(out.eteint).every((n) => n === 0)
     && c.puceFree === 1 && c.lot10 === 1 && c.ouvrir === 2 && c.ki === 0 && c.jaquette === 0 && c.rouvrir === 0
     && c.tear === 2 && c.skip === 2 && c.pages === 1 && c.encore === 2 && c.keep === 0 && c.retour === 0
-    && JSON.stringify(out.seance.achats) === JSON.stringify([{ payment: 'free', quantity: 2 }, { payment: 'quest', quantity: 8 }])
-    && out.seance.reserve.free === 0 && out.seance.reserve.quest === 0
+    && JSON.stringify(out.seance.achats) === JSON.stringify([{ payment: 'free', quantity: 2 }, { payment: 'reward', quantity: 8 }])
+    && out.seance.reserve.free === 0 && out.seance.reserve.reward === 0
     && out.seance.bilan.ouvertes === 10 && out.seance.bilan.cartes === 50 && out.seance.bilan.rares === 3
     && JSON.stringify(out.seance.journal) === JSON.stringify(['UR Hidan #889', 'UR Madara #100', 'TRS Goku #007'])
     && out.seance.toastFin && out.seance.panneau && out.seance.eclair.pendant && !out.seance.eclair.apres
     && /10 booster/.test(out.seance.bilanAffiche) && /3 rare/.test(out.seance.bilanAffiche) && out.seance.boutonRares === '✦ Rares (3)'
-    && JSON.stringify(out.sansBascule.achats) === JSON.stringify([{ payment: 'free', quantity: 2 }, { payment: 'quest', quantity: 8 }])
+    && JSON.stringify(out.sansBascule.achats) === JSON.stringify([{ payment: 'free', quantity: 2 }, { payment: 'reward', quantity: 8 }])
     && out.sansBascule.ki === 0 && out.sansBascule.puces === 1 && out.sansBascule.jaquette === 0 && out.sansBascule.rouvrir === 0
-    && /plus de boosters gratuits ni de quête.*\[bouton : quest, grisé · puces : ki\]/.test(out.sansBascule.diag)
+    && /plus de boosters gratuits ni de quête.*\[bouton : reward, grisé · puces : ki\]/.test(out.sansBascule.diag)
     && out.sansReserve.eteint && out.sansReserve.ki === 0 && out.sansReserve.ouvrir === 2
     && out.pasMemorise.off && !out.pasMemorise.reglage && out.pasMemorise.journal === 6
     && out.manuel.clics === 0 && out.manuel.dernier === 'Alucard' && out.manuel.journal === 7

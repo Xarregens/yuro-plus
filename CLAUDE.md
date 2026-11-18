@@ -53,10 +53,11 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   encore des boosters ↗ » qui ramène à la boutique ; `#reopenSamePack` « Rouvrir » (jamais cliqué : paiement
   inconnu). Le dialogue refermé perd son attribut `open` (une ouverture n'est « en cours » que si une étape est
   visible). Réponse de `POST /api/booster` : `freeBoosters`, `freeBoosterAt`, `questBoosters`, `referralBoosters`
-  (parrainage, 3e source gratuite), `ki`, `revision`. JAMAIS VU : l'état de la boutique avec des boosters de quête en
-  réserve (toutes les captures sont prises après) — nom exact de la puce/`data-source` Quêtes et bascule du site non
-  confirmés. Le 18/11 le propriétaire signale que les boosters de quête ne s'ouvrent pas (0.11.0) ; hypothèse : le
-  site garde « Gratuit » épuisé choisi, bouton grisé, au lieu de passer aux Quêtes.
+  (parrainage, 3e source gratuite, jamais vue à l'écran : nom deviné), `ki`, `revision`. NOMS RÉELS (yuroDiag du 18/11
+  14:45) : Gratuit = `data-source="free"` + `data-free-booster` ; Quêtes = `data-source="reward"`, classe `is-reward`,
+  `data-quest-booster`, puce `data-bv4-pay="reward"` « Quêtes 9 », libellé « Récompense de quête » — alors que la
+  requête dit `payment:"quest"` (bogue 0.11.0/0.11.1 : « reward » pas reconnu, le script refusait d'ouvrir) ; ki =
+  `data-source="ki"` + `data-buy-booster`. Le site passe seul de Gratuit à Quêtes.
   « Ouverture auto » (`reglages.ouverture`, interrupteur id `pk`) : choisit une puce gratuite (`pucesGratuites`) si le
   bouton propose du ki OU reste grisé sur une source épuisée, choisit ×10, clique `#bv4Open` SEULEMENT si
   `sourceGratuite` (data-source ∈ free/quest(s)/referral(s) ou classe is-free/is-quest/is-referral, et jamais rien
