@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.11.4
+// @version      0.11.5
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini, « Ouverture auto » des boosters gratuits et de quête avec journal des cartes rares, filtre « Doublons » au marché ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.11.4";
+  const YURO_VERSION = "0.11.5";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -1479,6 +1479,65 @@
   const tickOuverture = createTicker(100);
   // le chargement de la liste du marché profite du même battement rapide
   tickOuverture.add(chargeDoublons);
+  // ---- yuroDiag.finCombat() : capture automatique de l'écran de fin de combat ----
+  // L'écran de fin ne reste qu'une ou deux secondes quand le Replay auto du site est allumé : impossible d'y taper
+  // yuroDiag.page() à temps. finCombat() attend le prochain écran de fin (ancien écran story-end-screen, ou tout bouton
+  // « Recommencer / Rejouer / Affronter à nouveau / Combat suivant / Retour à la salle » qui apparaît), le photographie
+  // dès qu'il s'affiche (fichier yuro-diag-fin), enregistre clics, changements de page et requêtes jusqu'à ce qu'il
+  // disparaisse (la relance), puis télécharge ce second fichier (yuro-diag-relance). Diagnostic seul : ne clique rien.
+  const FIN_SELECTEURS = 'section.story-end-screen, [class*="end-screen"], [class*="result-screen"], [class*="combat-end"], [data-farm-start], [data-infinity-start], [data-hw26-play]';
+  const FIN_TEXTE = /recommencer|rejouer|affronter à nouveau|combat suivant|retour à la salle/i;
+  const ecranDeFin = () => {
+    for (const element of document.querySelectorAll(FIN_SELECTEURS)) {
+      if (visible(element) && !element.closest("[data-yuro-auto], #yuro-plus-rares, #yuro-plus-boosters")) return element;
+    }
+    return [...document.querySelectorAll("button, a[role='button']")].find((bouton) => visible(bouton) && FIN_TEXTE.test(bouton.textContent ?? "") && !bouton.closest("[data-yuro-auto], [data-yuro-rares], #yuro-plus-rares, #yuro-plus-boosters")) ?? null;
+  };
+  let guetteFin = null;
+  tickOuverture.add(() => {
+    if (!guetteFin) return;
+    const fin = ecranDeFin();
+    const maintenant = Date.now();
+    if (maintenant > guetteFin.jusqua) {
+      guetteFin = null;
+      const fichier = saveJson("yuro-diag-relance", snapshot(recording ? recording.lines.slice() : null));
+      if (recording) stop();
+      toast(`Yuro Plus : aucun écran de fin repéré pendant l’attente ; enregistrement ${fichier} téléchargé quand même, envoie-le-moi.`);
+      return;
+    }
+    if (guetteFin.etape === "attend" && guetteFin.dejaLa) {
+      // un écran de fin était déjà là au lancement : attendre qu'il parte pour guetter le SUIVANT
+      if (!fin) guetteFin.dejaLa = false;
+      return;
+    }
+    if (guetteFin.etape === "attend" && fin) {
+      guetteFin.etape = "photo";
+      guetteFin.vuA = maintenant;
+      return;
+    }
+    if (guetteFin.etape === "photo" && maintenant - guetteFin.vuA >= 150) {
+      guetteFin.etape = "relance";
+      const fichier = saveJson("yuro-diag-fin", snapshot());
+      toast(`Yuro Plus : écran de fin photographié (${fichier}). J’enregistre maintenant la relance…`);
+      return;
+    }
+    if (guetteFin.etape === "relance" && !fin) {
+      guetteFin.etape = "apres";
+      guetteFin.partiA = maintenant;
+      return;
+    }
+    if (guetteFin.etape === "apres" && maintenant - guetteFin.partiA >= 2e3) {
+      guetteFin = null;
+      const fichier = saveJson("yuro-diag-relance", snapshot(recording ? recording.lines.slice() : null));
+      if (recording) stop();
+      toast(`Yuro Plus : relance enregistrée (${fichier}). Envoie-moi les deux fichiers yuro-diag-fin et yuro-diag-relance.`);
+    }
+  });
+  window.yuroDiag.finCombat = (minutes = 10) => {
+    menu(minutes * 60 + 30);
+    guetteFin = { etape: "attend", dejaLa: Boolean(ecranDeFin()), jusqua: Date.now() + minutes * 6e4 };
+    return `j’attends le prochain écran de fin de combat (jusqu’à ${minutes} min) : joue normalement, les deux fichiers se téléchargeront tout seuls`;
+  };
   tickOuverture.add(() => {
     if (!reglages.ouverture) return;
     litRecapitulatif();

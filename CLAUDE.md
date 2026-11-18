@@ -146,5 +146,13 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
 - Combats après les modifs du site (17/11/2026) : apparition de `POST /api/save/combat` `{op:"hold"|"release",
   kind:"raid"}` (verrou de raid). Écrans de fin farm/château/Halloween non recapturés depuis : à vérifier si le
   propriétaire signale un bouton du script qui ne marche plus.
+  18/11 : le propriétaire signale qu'en combat le « Replay auto » du site met 1–2 s à relancer — notre relance rapide
+  (0,6 s, `checkFarm`) ne se déclenche donc vraisemblablement plus (écran de fin renommé ?). Aucune capture de l'écran
+  de fin depuis les modifs ; il ne reste qu'1–2 s, trop court pour `yuroDiag.page()`. 0.11.5 : `yuroDiag.finCombat(min)`
+  (diagnostic seul, ne clique rien) attend le PROCHAIN écran de fin (anciens sélecteurs, ou tout bouton
+  Recommencer / Rejouer / Affronter à nouveau / Combat suivant / Retour à la salle hors boutons du script ; un écran
+  déjà affiché au lancement est ignoré), le photographie 150 ms après son apparition (`yuro-diag-fin-*.json`), puis
+  enregistre jusqu'à 2 s après sa disparition (`yuro-diag-relance-*.json`, avec mutations et requêtes). Test
+  `tests/fincombat.cjs`. À recoder dès réception : `checkFarm` (et château/Halloween si renommés).
 - Le script note en permanence (mémoire glissante) les requêtes fetch/XHR du site et sa WebSocket, e-mails et clés
   sensibles masqués ; ne jamais enregistrer de jeton en clair dans un fichier téléchargé.
