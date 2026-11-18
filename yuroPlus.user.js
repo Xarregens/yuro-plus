@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.11.5
-// @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini, « Ouverture auto » des boosters gratuits et de quête avec journal des cartes rares, filtre « Doublons » au marché ; commandes d'enregistrement yuroDiag.
+// @version      0.11.6
+// @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm et en raid, « Suivant auto » dans le Château de l'infini, « Ouverture auto » des boosters gratuits et de quête avec journal des cartes rares, filtre « Doublons » au marché ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
 // @supportURL   https://github.com/xarregens/yuro-plus/issues
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.11.5";
+  const YURO_VERSION = "0.11.6";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -316,6 +316,22 @@
       if (!visible(endScreen) || !visible(autoOn)) return null;
       const restart = endScreen.querySelector(RESTART);
       return visible(restart) && !restart.disabled ? restart : null;
+    },
+    nomAction: "combat relancé",
+    raisonLente: `replay auto resté bloqué ${Math.round(reglages.attenteMs / 1e3)} s`,
+    compte: () => window.yuroPlus.relances++
+  });
+  // Raids (et autres combats Story) : capture yuroDiag.finCombat() du 18/11/2026, Raid 2 « Sacrifice » — écran de fin
+  // section.story-end-screen.won (pas de classe farm-end), boutons .story-result-buttons : « ↻ Rejouer »
+  // [data-raid-level="91015"] (button.btn.primary), « Suivant → » (désactivé ici), « Retour aux actes »
+  // [data-story-map]. Replay auto du site [data-combat-auto="replay"].is-on : le site attend ~2 s, puis ajoute la classe
+  // combat-end-leaving à l'écran et relance. Comme en farm, on clique « Rejouer » nous-mêmes après rapideMs, seulement
+  // à la victoire (rien de connu sur la relance après défaite), jamais le « Rejouer » du château [data-infinity-replay].
+  const checkRejouer = createWatcher({
+    trouve: () => {
+      const fin = document.querySelector("section.story-end-screen.won:not(.farm-end):not(.hw-end)");
+      if (!visible(fin) || fin.classList.contains("combat-end-leaving") || !visible(document.querySelector(AUTO_ON))) return null;
+      return [...fin.querySelectorAll(".story-result-buttons button:not([data-infinity-replay])")].find((bouton) => /rejouer/i.test(bouton.textContent ?? "") && !bouton.disabled && visible(bouton)) ?? null;
     },
     nomAction: "combat relancé",
     raisonLente: `replay auto resté bloqué ${Math.round(reglages.attenteMs / 1e3)} s`,
@@ -1462,6 +1478,7 @@
     mountToggles();
     majEclair();
     checkFarm();
+    checkRejouer();
     checkTower();
     checkHalloween();
     checkSource();

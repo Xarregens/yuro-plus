@@ -4,7 +4,7 @@ Un seul programme : `yuroPlus.user.js`, userscript Tampermonkey pour le jeu yuro
 (Xarregens) n'est pas développeur : parler simplement, livrer des versions complètes, tester avant d'envoyer, ne jamais
 toucher au vrai site autrement qu'en lecture. Même façon de travailler que le dépôt frère `kyara-plus` (Kyara Plus).
 
-- Ce que fait le script (0.11.x) : relance immédiate du replay auto en farm (`createWatcher`), « Suivant auto » dans le
+- Ce que fait le script (0.11.x) : relance immédiate du replay auto en farm et en raid (`createWatcher`), « Suivant auto » dans le
   Château de l'infini et « Rejouer auto » en Halloween (interrupteurs du script montés dans le bandeau par
   `mountToggle`, remontés sur mutation pour ne pas clignoter), série V · D · bonbons en Halloween, « Ouverture
   auto » des boosters gratuits et de quête + journal des cartes rares (panneau « ✦ Rares » sur le site, ouvert tout
@@ -153,6 +153,16 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   Recommencer / Rejouer / Affronter à nouveau / Combat suivant / Retour à la salle hors boutons du script ; un écran
   déjà affiché au lancement est ignoré), le photographie 150 ms après son apparition (`yuro-diag-fin-*.json`), puis
   enregistre jusqu'à 2 s après sa disparition (`yuro-diag-relance-*.json`, avec mutations et requêtes). Test
-  `tests/fincombat.cjs`. À recoder dès réception : `checkFarm` (et château/Halloween si renommés).
+  `tests/fincombat.cjs`.
+- Raids (capture `finCombat` du 18/11/2026 16:06, Raid 2 « Sacrifice », page `#combat`) : ce n'était pas une
+  régression, la relance rapide n'a jamais couvert que le Farm. Écran de fin `section.story-end-screen.won` (sans
+  `farm-end`), `.story-result-buttons` : « ↻ Rejouer » `button.btn.primary[data-raid-level="91015"]`, « Suivant → »
+  (désactivé), « Retour aux actes » `[data-story-map]`, croix `.story-result-close[data-story-map]`. Bandeau du combat :
+  Replay auto du SITE `[data-combat-auto="replay"]` (`is-on`) ET « ⏭ Suivant auto » du SITE `[data-combat-auto="next"]`
+  (« Après une victoire, l'acte suivant se lance tout seul » ; à ne pas confondre avec notre `[data-yuro-auto="next"]`
+  du château), série `.qol-series`. Le site attend ~2 s (36,95 → 38,96) puis ajoute `combat-end-leaving` et relance.
+  0.11.6 `checkRejouer` : à la victoire, Replay auto du site allumé, écran pas encore `combat-end-leaving` → clic sur
+  le bouton « Rejouer » des `.story-result-buttons` (jamais `[data-infinity-replay]` du château) après `rapideMs`.
+  Test `tests/raid.cjs` (et vérifié sur le HTML réel capturé).
 - Le script note en permanence (mémoire glissante) les requêtes fetch/XHR du site et sa WebSocket, e-mails et clés
   sensibles masqués ; ne jamais enregistrer de jeton en clair dans un fichier téléchargé.
