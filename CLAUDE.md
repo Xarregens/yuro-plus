@@ -117,6 +117,19 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   rappels rejoués onglet caché de plus d'1 s en `disjoncteurFenetreMs` (3 min) → `fond.actif = false` pour cette page
   (non mémorisé, le navigateur endort le jeu comme sans script, la page reste en vie), message conseillant F5 au
   retour ; `yuroPlus.arrierePlan(true)` relance. Sur le cas du 18/11 il aurait sauté ~1 min 30 avant la mort.
+  CAUSE TROUVÉE (3e boîte noire, 18/11 15:49, 0.10.4) : `elements` ≈ 79 000 et `animationsCss` ≈ 78 000 dans la page,
+  +≈170 à chaque combat (à chaque `runStoryAuto`). Un onglet caché ne joue aucune animation CSS, donc jamais
+  d'`animationend` ; or le site retire ses effets de combat à la fin de leur animation (écouteurs animationend, dont
+  `#document.onanimationend` déjà vu dans une image longue de 4,8 s). Ils s'empilaient tant que notre arrière-plan
+  faisait combattre onglet caché, et au retour au premier plan le navigateur terminait les 78 000 d'un coup → page
+  figée. Correctif 0.11.4 (`termineAnimations`, dans le battement d'`installFond`, onglet caché + `fond.actif`
+  seulement) : toute animation de durée finie (`effect.getComputedTiming().endTime`) écoulée depuis qu'on l'a vue est
+  menée à son terme comme le ferait le navigateur visible — `animationend` (CSSAnimation) ou `transitionend`
+  (CSSTransition) envoyé à sa cible, puis `cancel()` si le site a retiré l'élément, sinon `finish()` (état final) ;
+  chaque animation une seule fois (WeakSet), animations en boucle jamais touchées, budget 2× `budgetMs` par battement ;
+  compteur `stats.animationsTerminees` dans la boîte noire. Test `tests/animations.cjs` (la 0.11.3 y échoue : 300
+  effets restent). Le site a aussi sa propre pause onglet inactif (`yuroTabInactive`), que notre arrière-plan
+  contourne volontairement.
 - Marché `#market`, onglet « Vendre » (yuroDiag du 17/11/2026) : `#marketWorkspace`, grille `.mkx-own-grid` de
   `button.mkx-own[data-market-sell=id]` (nom `.mkx-own-copy strong`, pastille `.mkx-own-art em` « ×N » = exemplaires
   possédés, confirmé ; le site réserve le dernier exemplaire, donc doublon = ×2+), puces de rareté `.mkx-chips

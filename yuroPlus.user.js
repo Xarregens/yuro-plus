@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.11.3
+// @version      0.11.4
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini, « Ouverture auto » des boosters gratuits et de quête avec journal des cartes rares, filtre « Doublons » au marché ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.11.3";
+  const YURO_VERSION = "0.11.4";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -1055,7 +1055,7 @@
   // séparé, qui continue de tourner pendant le blocage. Sans nouvelles depuis seuilMs alors que lui-même tournait
   // normalement (pas une mise en veille de l'ordinateur), il écrit ses derniers états en IndexedDB ; si la page
   // reprend vie, il note l'heure de reprise. Au chargement suivant, un message propose yuroDiag.boiteNoire().
-  const stats = { mutations: 0, remontages: 0, rejeuMs: 0, pireMs: 0, pireNom: "", minuteries: 0, animations: 0, disjoncte: false };
+  const stats = { mutations: 0, remontages: 0, rejeuMs: 0, pireMs: 0, pireNom: "", minuteries: 0, animations: 0, disjoncte: false, animationsTerminees: 0 };
   const BOITE = { base: "yuro-plus", magasin: "boite-noire", cle: "dernier", seuilMs: 8e3 };
   const boiteNoire = (() => {
     const code = `
@@ -1358,6 +1358,46 @@
     // en disjoncteurFenetreMs, onglet caché, l'arrière-plan est mis en pause pour cette page : le navigateur reprend la
     // main et met le jeu en sommeil comme sans le script, la page reste en vie. Pas mémorisé : rechargée, la page repart
     // avec l'arrière-plan (et allégée) ; yuroPlus.arrierePlan(true) le relance tout de suite.
+    // Animations terminées à la place du navigateur (boîte noire du 18/11 15:49, cause du figeage trouvée) : un onglet
+    // caché ne joue AUCUNE animation CSS, donc aucun « animationend » ; or le site retire ses effets de combat (≈ 170
+    // par combat) à la fin de leur animation. Onglet caché, ils s'empilaient : 78 000 dans la page, et au retour le
+    // navigateur les terminait tous d'un coup → page figée (et une image de 4,8 s déclenchée par onanimationend).
+    // Onglet caché, on fait donc ce que ferait le navigateur visible : une animation dont la durée est écoulée
+    // (mesurée depuis qu'on l'a vue) est menée à son terme, et le site reçoit son animationend / transitionend.
+    // Les animations sans fin (en boucle) ne sont jamais touchées. Chaque animation n'est traitée qu'une fois.
+    const animationsVues = new WeakMap();
+    const animationsTraitees = new WeakSet();
+    function termineAnimations(debutBattement) {
+      if (!fond.actif || !isHidden() || !document.getAnimations) return;
+      const maintenant = performance.now();
+      for (const anim of document.getAnimations()) {
+        if (performance.now() - debutBattement > reglages.budgetMs * 2) break; // le reste au battement suivant
+        if (animationsTraitees.has(anim)) continue;
+        let fin;
+        try {
+          fin = anim.effect?.getComputedTiming().endTime;
+        } catch {}
+        if (!Number.isFinite(fin)) continue; // en boucle : laissée au navigateur
+        if (!animationsVues.has(anim)) animationsVues.set(anim, maintenant);
+        if (maintenant - animationsVues.get(anim) < fin) continue;
+        animationsTraitees.add(anim);
+        stats.animationsTerminees++;
+        const cible = anim.effect?.target;
+        const secondes = fin / 1e3;
+        try {
+          if (cible && typeof CSSAnimation !== "undefined" && anim instanceof CSSAnimation) {
+            cible.dispatchEvent(new AnimationEvent("animationend", { bubbles: true, animationName: anim.animationName, elapsedTime: secondes, pseudoElement: anim.effect.pseudoElement ?? "" }));
+          } else if (cible && typeof CSSTransition !== "undefined" && anim instanceof CSSTransition) {
+            cible.dispatchEvent(new TransitionEvent("transitionend", { bubbles: true, propertyName: anim.transitionProperty, elapsedTime: secondes, pseudoElement: anim.effect.pseudoElement ?? "" }));
+          }
+        } catch {}
+        // élément retiré par le site : l'animation part avec lui ; resté en place : figé sur sa position finale
+        try {
+          if (cible && !cible.isConnected) anim.cancel();
+          else anim.finish();
+        } catch {}
+      }
+    }
     const lents = [];
     function disjoncteur(nom) {
       const maintenant = Date.now();
@@ -1408,6 +1448,7 @@
         else timers.delete(id);
         rejoue(timer.callback, timer.args, cache, timer.every ? `intervalle ${timer.every} ms` : `minuterie ${timer.delai} ms`);
       }
+      termineAnimations(debut);
       stats.rejeuMs = Math.round(performance.now() - debut);
       stats.minuteries = timers.size;
       stats.animations = rafQueue.size;
