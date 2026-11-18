@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.10.1
+// @version      0.10.2
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini, « Citrouilles auto » et journal des cartes rares en Halloween, filtre « Doublons » au marché ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.10.1";
+  const YURO_VERSION = "0.10.2";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -954,7 +954,7 @@
   const BOITE = { base: "yuro-plus", magasin: "boite-noire", cle: "dernier", seuilMs: 8e3 };
   const boiteNoire = (() => {
     const code = `
-      let dernier = Date.now(), tour = Date.now(), journal = [], enCours = null, incident = null;
+      let dernier = Date.now(), tour = Date.now(), journal = [], enCours = null, incident = null, sequence = [], longs = [];
       const ecrire = (fiche) => {
         const ouverture = indexedDB.open(${JSON.stringify(BOITE.base)}, 1);
         ouverture.onupgradeneeded = () => ouverture.result.createObjectStore(${JSON.stringify(BOITE.magasin)});
@@ -965,7 +965,18 @@
         };
       };
       onmessage = (e) => {
-        if (e.data.genre === "debut") { enCours = e.data.nom; return; }
+        if (e.data.genre === "debut") {
+          enCours = e.data.nom;
+          sequence.push({ t: e.data.t, nom: e.data.nom, type: e.data.type });
+          if (sequence.length > 20) sequence.shift();
+          return;
+        }
+        if (e.data.genre === "long") {
+          longs.push(e.data.rappel);
+          if (longs.length > 5) longs.shift();
+          if (incident) { incident.rappelsLongs = longs.slice(); ecrire({ ...incident }); }
+          return;
+        }
         dernier = Date.now();
         enCours = null;
         journal.push(e.data.etat);
@@ -977,7 +988,7 @@
         if (maintenant - tour > 3000) dernier = maintenant; // le worker était lui-même suspendu (veille) : pas un blocage
         tour = maintenant;
         if (incident || !journal.length || maintenant - dernier < ${BOITE.seuilMs}) return;
-        incident = { figeeVueLe: new Date(maintenant).toISOString(), dernierSigneDeVie: new Date(dernier).toISOString(), rappelEnCours: enCours, repriseLe: null, journal: journal.slice() };
+        incident = { figeeVueLe: new Date(maintenant).toISOString(), dernierSigneDeVie: new Date(dernier).toISOString(), rappelEnCours: enCours, derniersRappels: sequence.slice(), rappelsLongs: longs.slice(), repriseLe: null, journal: journal.slice() };
         ecrire({ ...incident });
       }, 1000);`;
     let worker = null;
@@ -1039,7 +1050,10 @@
         stats.pireNom = "";
       },
       // juste avant chaque rappel rejoué onglet caché : si la page se fige dedans, la boîte noire saura lequel
-      debut: (nom) => worker && envoie({ genre: "debut", nom }),
+      debut: (nom, type) => worker && envoie({ genre: "debut", nom, type, t: stamp() }),
+      // un rappel du site qui a bloqué la page plus d'une seconde : son code (celui du site, pas une donnée du joueur)
+      // est joint au rapport, pour savoir ce qu'il fait
+      long: (rappel) => worker && envoie({ genre: "long", rappel }),
       lit,
       // au chargement : prévenir une fois qu'un rapport attend
       async annonce() {
@@ -1130,7 +1144,7 @@
     window.setTimeout = (callback, delay = 0, ...args) => {
       if (!fond.actif || !isHidden() || typeof callback !== "function") return nativeSetTimeout(callback, delay, ...args);
       const id = ++nextId;
-      timers.set(id, { at: Date.now() + (Number(delay) || 0), callback, args });
+      timers.set(id, { at: Date.now() + (Number(delay) || 0), delai: Number(delay) || 0, callback, args });
       return id;
     };
     window.clearTimeout = (id) => {
@@ -1152,9 +1166,9 @@
     // boucle du combat mourrait là (bogue de la 0.7.0, combats figés « ils se regardent »).
     // Budget par battement (budgetMs) : au-delà, le reste attend le battement suivant, pour ne jamais enchaîner des
     // secondes de calcul d'un bloc. Chaque rappel est chronométré pour la boîte noire.
-    const rejoue = (callback, args, cache) => {
+    const rejoue = (callback, args, cache, type) => {
       const debut = performance.now();
-      if (cache) boiteNoire.debut(nomRappel(callback));
+      if (cache) boiteNoire.debut(nomRappel(callback), type);
       try {
         callback(...args);
       } catch {}
@@ -1162,6 +1176,9 @@
       if (duree > stats.pireMs) {
         stats.pireMs = Math.round(duree);
         stats.pireNom = nomRappel(callback);
+      }
+      if (duree > 1e3) {
+        boiteNoire.long({ t: stamp(), nom: callback.name || "(anonyme)", type, dureeMs: Math.round(duree), ongletCache: cache, code: String(callback).slice(0, 4e3) });
       }
     };
     tick.add(() => {
@@ -1176,7 +1193,7 @@
           const reste = [];
           for (const [id, callback] of entries) {
             if (horsBudget()) reste.push([id, callback]);
-            else rejoue(callback, [stamp], true);
+            else rejoue(callback, [stamp], true, "animation");
           }
           if (reste.length) {
             const nouveaux = [...rafQueue];
@@ -1193,7 +1210,7 @@
         if (horsBudget()) break;
         if (timer.every) timer.at = now + timer.every;
         else timers.delete(id);
-        rejoue(timer.callback, timer.args, cache);
+        rejoue(timer.callback, timer.args, cache, timer.every ? `intervalle ${timer.every} ms` : `minuterie ${timer.delai} ms`);
       }
       stats.rejeuMs = Math.round(performance.now() - debut);
       stats.minuteries = timers.size;

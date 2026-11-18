@@ -1,5 +1,6 @@
 // Boîte noire et garde-fous de l'arrière-plan : une page figée (calcul sans fin pendant un rejeu onglet caché) est
 // repérée par le worker, qui note le rappel en cours et ses derniers états en IndexedDB, puis l'heure de reprise ;
+// le rapport donne aussi la suite des derniers rappels et le code du rappel qui a bloqué plus d'une seconde ;
 // yuroDiag.boiteNoire() télécharge le rapport ; message au chargement suivant (une seule fois) ; aucune fausse alerte
 // sur une page normale ; frein anti ping-pong quand le site retire nos boutons aussitôt ajoutés.
 const { chromium } = require('playwright');
@@ -52,6 +53,8 @@ const toasts = (page) => page.evaluate(() => [...document.querySelectorAll('body
     figee: Boolean(rapport.figeeVueLe),
     reprise: Boolean(rapport.repriseLe),
     etats: rapport.journal.length,
+    sequence: (rapport.derniersRappels ?? []).at(-1),
+    long: rapport.rappelsLongs?.[0] && { nom: rapport.rappelsLongs[0].nom, type: rapport.rappelsLongs[0].type, dureeMs: rapport.rappelsLongs[0].dureeMs, code: /while \(Date\.now\(\) < fin\)/.test(rapport.rappelsLongs[0].code) },
     dernierEtat: rapport.journal.at(-1) && { ongletCache: rapport.journal.at(-1).ongletCache, arrierePlan: rapport.journal.at(-1).arrierePlan, page: rapport.journal.at(-1).page }
   };
   // 3. au chargement suivant, un message propose le rapport ; une seule fois
@@ -83,6 +86,8 @@ const toasts = (page) => page.evaluate(() => [...document.querySelectorAll('body
   out.errors = errors;
   const ok = out.fausseAlerte.includes('vide')
     && out.rapport.nom.startsWith('yuro-boite-noire-') && /figeLaPage/.test(out.rapport.rappel ?? '') && out.rapport.figee && out.rapport.reprise
+    && out.rapport.sequence?.nom === 'figeLaPage' && out.rapport.sequence?.type === 'minuterie 100 ms'
+    && out.rapport.long?.nom === 'figeLaPage' && out.rapport.long.type === 'minuterie 100 ms' && out.rapport.long.dureeMs >= 10000 && out.rapport.long.code
     && out.rapport.etats >= 1 && out.rapport.dernierEtat.ongletCache === true && out.rapport.dernierEtat.arrierePlan === true && out.rapport.dernierEtat.page === '#combat'
     && out.annonce && out.annonceUneFois
     && out.pingPong.reactive && out.pingPong.retraits > 0 && out.pingPong.retraits < 200

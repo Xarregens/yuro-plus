@@ -74,7 +74,16 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   `yuroDiag.boiteNoire()` télécharge le rapport ; (2) frein anti ping-pong : plus de `remontagesMax` (30) boutons
   recréés en 1 s par l'observateur de mutations → remontage sur mutation suspendu 5 s (si le site retire tout élément
   étranger de son bandeau, sans frein la page se fige : vérifié par `tests/boite.cjs`) ; (3) journal des requêtes en un
-  seul passage, rien au-delà de 2 Mo. Prochaine étape : analyser une boîte noire réelle.
+  seul passage, rien au-delà de 2 Mo.
+  Première boîte noire réelle (18/11/2026, 0.10.1, fenêtre réduite en Story auto `#combat`) : page bloquée ~19 s
+  (dernier signe de vie 07:10:21, reprise 07:10:40) dans un rappel du SITE nommé `run`, rejoué par notre arrière-plan
+  (minuterie ou animation). Avant : tout normal — mémoire 57–70 Mo stable, 0 recréation de bouton (pas de ping-pong),
+  notre rejeu ≤ 127 ms, `runStoryAuto` ~100–125 ms toutes les ~7 s (un combat), `scan` ~12–20 ms à chaque battement.
+  Le blocage tombe à l'heure du combat suivant. Pistes non tranchées : combat du site qui ne finit pas (« ils se
+  regardent ») résolu d'un bloc, ou boucle de rattrapage. 0.10.2 : le rapport joint la suite des 20 derniers rappels
+  rejoués (nom, type « animation » / « minuterie N ms » / « intervalle N ms ») et le CODE de tout rappel ayant bloqué
+  plus d'une seconde (`rappelsLongs`, code du site, 4000 caractères) : attendre la prochaine boîte noire pour lire
+  `run` avant de corriger.
 - Marché `#market`, onglet « Vendre » (yuroDiag du 17/11/2026) : `#marketWorkspace`, grille `.mkx-own-grid` de
   `button.mkx-own[data-market-sell=id]` (nom `.mkx-own-copy strong`, pastille `.mkx-own-art em` « ×N » = exemplaires
   possédés, confirmé ; le site réserve le dernier exemplaire, donc doublon = ×2+), puces de rareté `.mkx-chips
