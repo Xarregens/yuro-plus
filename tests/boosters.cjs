@@ -4,7 +4,8 @@
 // boosters » — et s'arrête quand le bouton ne propose plus que du ki. JAMAIS de clic sur « Ouvrir » payé en ki, sur
 // une jaquette (« Ouvrir ici ») ni sur « Rouvrir ». Notre bouton vit à côté de la section qui se redessine. Mode éclair
 // pendant la séance seulement ; journal UR/LR/EX/TRS mémorisé (aussi en ouverture manuelle), panneau « ✦ Rares »
-// ouvert en fin de séance et vidable.
+// ouvert en fin de séance et vidable. Le booster simulé ignore les clics pendant son animation d'arrivée (0,7 s) :
+// il doit quand même être déchiré en moins de 1,5 s (la 0.11.2 attendait 5 s après un clic trop précoce).
 const { chromium } = require('playwright');
 const fs = require('fs');
 const script = fs.readFileSync(process.argv[2], 'utf8');
@@ -26,7 +27,8 @@ const PAGE = `<!doctype html><html><body><main>
 const $ = (s) => document.querySelector(s);
 window.__reserve = { free: 2, reward: 8 };
 let lot = 1, choix = null, tirageNo = -1, pageNo = 0;
-window.__clics = { ouvrir: 0, ki: 0, lot10: 0, puceFree: 0, puceKi: 0, jaquette: 0, rouvrir: 0, tear: 0, skip: 0, pages: 0, encore: 0, keep: 0, retour: 0 };
+window.__clics = { ouvrir: 0, ki: 0, lot10: 0, puceFree: 0, puceKi: 0, jaquette: 0, rouvrir: 0, tear: 0, tearIgnore: 0, skip: 0, pages: 0, encore: 0, keep: 0, retour: 0 };
+window.__dechireEn = [];
 window.__achats = [];
 const sourceAuto = () => choix ?? (window.__reserve.free ? 'free' : window.__reserve.reward ? 'reward' : 'ki');
 // comme le vrai site : la section entière est redessinée (innerHTML) à chaque changement
@@ -82,9 +84,11 @@ document.addEventListener('click', (e) => {
   window.__achats.push({ payment: src, quantity: nb });
   enCours = nb;
   etape('dechirer');
+  window.__ouvertA = Date.now();
   return;
  }
- if (t.closest('#tearPack')) { window.__clics.tear++; etape('defile'); return; }
+ // comme le vrai site : le booster ignore les clics pendant son animation d'arrivée (~0,7 s)
+ if (t.closest('#tearPack')) { if (Date.now() - window.__ouvertA < 700) { window.__clics.tearIgnore++; return; } window.__clics.tear++; window.__dechireEn.push(Date.now() - window.__ouvertA); etape('defile'); return; }
  if (t.closest('#skipPackReview')) { window.__clics.skip++; window.__recap(window.__achats.length - 1, enCours); return; }
  if (t.closest('#packSummaryPager [data-summary-page="1"]')) { if (!t.closest('button').disabled) { window.__clics.pages++; window.__page(pageNo + 1); } return; }
  if (t.closest('#openAnotherPack')) { window.__clics.encore++; etape('ferme'); boutique(); return; }
@@ -104,7 +108,7 @@ boutique();
   const boot = async () => {
     await page.goto(`https://yurocollection.fr/?t=${Date.now()}#boosters`);
     await page.addScriptTag({ content: script });
-    await page.evaluate(() => { Object.assign(yuroPlus.reglages, { rapideMs: 150, reessaiMs: 500 }); });
+    // délais réels du script (rien d'accéléré) : le test mesure aussi la vitesse de déchirage
     await page.waitForSelector('#yuro-plus-boosters [data-yuro-auto="pk"]', { timeout: 3000 });
   };
   const out = {};
@@ -123,6 +127,7 @@ boutique();
   await page.waitForTimeout(800);
   out.seance = await page.evaluate(() => ({
     clics: { ...window.__clics },
+    dechireEnMs: window.__dechireEn,
     achats: window.__achats,
     reserve: { ...window.__reserve },
     bilan: { ...yuroPlus.packs },
@@ -160,7 +165,9 @@ boutique();
   out.vider = await page.evaluate(() => { yuroPlus.cartesRares('vider'); return yuroPlus.cartesRares(); });
   out.errors = errors;
   const c = out.seance.clics;
-  const ok = out.monte.texte === '🎁 Ouverture autoOFF' && out.monte.apresSection === 'boosterPurchase'
+  const dechire = out.seance.dechireEnMs;
+  const ok = dechire.length === 2 && dechire.every((ms) => ms >= 700 && ms < 1500)
+    && out.monte.texte === '🎁 Ouverture autoOFF' && out.monte.apresSection === 'boosterPurchase'
     && Object.values(out.eteint).every((n) => n === 0)
     && c.puceFree === 1 && c.lot10 === 1 && c.ouvrir === 2 && c.ki === 0 && c.jaquette === 0 && c.rouvrir === 0
     && c.tear === 2 && c.skip === 2 && c.pages === 1 && c.encore === 2 && c.keep === 0 && c.retour === 0

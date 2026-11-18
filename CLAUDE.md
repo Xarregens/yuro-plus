@@ -67,7 +67,10 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   reste. Le message d'arrêt (et la console) donne `etatBoutique()` : source du bouton, grisé ou non, puces présentes
   — de quoi diagnostiquer une source non reconnue. Journal des
   UR/LR/EX/TRS (`yuro-plus:cartes-rares`, 300 max) alimenté même en ouverture manuelle ; bilan `bilanPacks` /
-  `yuroPlus.packs` ; vitesse : ticker 100 ms (`ouvertureMs`) et « mode éclair » (`eclair`, mémorisé sous
+  `yuroPlus.packs` ; vitesse : le booster `#tearPack` IGNORE les clics pendant son animation d'arrivée (~0,7 s) — un
+  clic trop tôt coûtait les 5 s de `reessaiMs` (lenteur signalée le 18/11) ; le surveillant de déchirage a son propre
+  délai `dechirerReessaiMs` (0,5 s, pas moins : un clic pendant l'animation pourrait la relancer) et 20 essais
+  (`createWatcher` accepte `reessai` / `essais` par surveillant) ; ticker 100 ms (`ouvertureMs`) et « mode éclair » (`eclair`, mémorisé sous
   `ouvertureEclair`) qui raccourcit à 1 ms animations/transitions de `#packDialog` pendant la séance (jamais 0 ms).
   Panneau « ✦ Rares (N) » `#yuro-plus-rares`, ouvert seul en fin de séance s'il y a eu des rares.
 - Arrière-plan : les vérifications battent dans un Web Worker (créé depuis un blob ; si le site ajoutait une CSP

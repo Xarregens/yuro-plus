@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.11.2
+// @version      0.11.3
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini, « Ouverture auto » des boosters gratuits et de quête avec journal des cartes rares, filtre « Doublons » au marché ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.11.2";
+  const YURO_VERSION = "0.11.3";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -238,6 +238,8 @@
     // d'écran de fin à laisser respirer (la lecture des rares est garantie avant « Ouvrir encore », quelle que
     // soit la vitesse)
     ouvertureMs: 100,
+    // déchirer le booster : nouvel essai après ce délai si le site a ignoré le clic (animation d'arrivée en cours)
+    dechirerReessaiMs: 500,
     // un bouton d'ouverture désactivé n'arrête la boucle que s'il le reste aussi longtemps : le site le coupe
     // aussi brièvement pendant ses animations
     patienceMs: 8e3,
@@ -271,7 +273,8 @@
   }
   // Un surveillant d'écran de fin : premier clic rapide (ou en secours après attenteMs si la relance rapide est
   // coupée), nouvel essai après reessaiMs si l'écran est toujours là, arrêt après essaisMax clics sans effet.
-  function createWatcher({ trouve, nomAction, raisonLente, compte, delai }) {
+  // delai / reessai / essais : réglages propres à un surveillant (sinon ceux des combats : rapideMs, reessaiMs, essaisMax)
+  function createWatcher({ trouve, nomAction, raisonLente, compte, delai, reessai, essais }) {
     let since = null;
     let lastClickAt = 0;
     let attempts = 0;
@@ -287,12 +290,13 @@
       }
       const now = Date.now();
       since ??= now;
-      const due = attempts === 0 ? since + (delai ? delai() : reglages.rapide ? reglages.rapideMs : reglages.attenteMs) : lastClickAt + reglages.reessaiMs;
+      const due = attempts === 0 ? since + (delai ? delai() : reglages.rapide ? reglages.rapideMs : reglages.attenteMs) : lastClickAt + (reessai ? reessai() : reglages.reessaiMs);
+      const maxEssais = essais ? essais() : reglages.essaisMax;
       if (now < due) return;
-      if (attempts >= reglages.essaisMax) {
+      if (attempts >= maxEssais) {
         if (!announced) {
           announced = true;
-          toast(`Yuro Plus : ${reglages.essaisMax} relances sans effet, j’arrête d’insister. yuroDiag.page() dans la console pour m’envoyer ce que voit le script.`);
+          toast(`Yuro Plus : ${maxEssais} relances sans effet, j’arrête d’insister. yuroDiag.page() dans la console pour m’envoyer ce que voit le script.`);
         }
         return;
       }
@@ -627,7 +631,12 @@
     nomAction: "booster déchiré",
     raisonLente: "booster resté fermé",
     compte: () => {},
-    delai: () => reglages.ouvertureMs
+    delai: () => reglages.ouvertureMs,
+    // le site ignore les clics sur le booster tant que son animation d'arrivée n'est pas finie : un clic trop tôt
+    // attendait 5 s (délai des combats) avant le suivant — c'était la lenteur du début d'ouverture. Ici, nouvel
+    // essai toutes les dechirerReessaiMs, sans mitrailler (un clic pendant l'animation pourrait la relancer)
+    reessai: () => reglages.dechirerReessaiMs,
+    essais: () => 20
   });
   // étape 2 : sauter le défilé carte par carte
   const checkPasser = createWatcher({
