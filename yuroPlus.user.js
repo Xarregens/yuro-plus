@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.11.6
+// @version      0.11.7
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm et en raid, « Suivant auto » dans le Château de l'infini, « Ouverture auto » des boosters gratuits et de quête avec journal des cartes rares, filtre « Doublons » au marché ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.11.6";
+  const YURO_VERSION = "0.11.7";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -1071,7 +1071,7 @@
   // séparé, qui continue de tourner pendant le blocage. Sans nouvelles depuis seuilMs alors que lui-même tournait
   // normalement (pas une mise en veille de l'ordinateur), il écrit ses derniers états en IndexedDB ; si la page
   // reprend vie, il note l'heure de reprise. Au chargement suivant, un message propose yuroDiag.boiteNoire().
-  const stats = { mutations: 0, remontages: 0, rejeuMs: 0, pireMs: 0, pireNom: "", minuteries: 0, animations: 0, disjoncte: false, animationsTerminees: 0 };
+  const stats = { mutations: 0, remontages: 0, rejeuMs: 0, pireMs: 0, pireNom: "", minuteries: 0, animations: 0, disjoncte: false, animationsTerminees: 0, animationsDetail: null };
   const BOITE = { base: "yuro-plus", magasin: "boite-noire", cle: "dernier", seuilMs: 8e3 };
   const boiteNoire = (() => {
     const code = `
@@ -1400,10 +1400,12 @@
         stats.animationsTerminees++;
         const cible = anim.effect?.target;
         const secondes = fin / 1e3;
+        const css = typeof CSSAnimation !== "undefined" && anim instanceof CSSAnimation;
+        const transition = typeof CSSTransition !== "undefined" && anim instanceof CSSTransition;
         try {
-          if (cible && typeof CSSAnimation !== "undefined" && anim instanceof CSSAnimation) {
+          if (cible && css) {
             cible.dispatchEvent(new AnimationEvent("animationend", { bubbles: true, animationName: anim.animationName, elapsedTime: secondes, pseudoElement: anim.effect.pseudoElement ?? "" }));
-          } else if (cible && typeof CSSTransition !== "undefined" && anim instanceof CSSTransition) {
+          } else if (cible && transition) {
             cible.dispatchEvent(new TransitionEvent("transitionend", { bubbles: true, propertyName: anim.transitionProperty, elapsedTime: secondes, pseudoElement: anim.effect.pseudoElement ?? "" }));
           }
         } catch {}
@@ -1412,7 +1414,49 @@
           if (cible && !cible.isConnected) anim.cancel();
           else anim.finish();
         } catch {}
+        // animation JavaScript (element.animate) : finish() règle sa promesse « finished », mais son événement « finish »
+        // (onfinish, souvent celui qui retire l'effet) n'est envoyé qu'au prochain rendu — jamais onglet caché (boîte
+        // noire du 18/11 17:33 : 52 000 animations restées malgré 77 000 terminées). On l'envoie nous-mêmes.
+        if (!css && !transition) {
+          try {
+            anim.dispatchEvent(new AnimationPlaybackEvent("finish", { currentTime: anim.currentTime, timelineTime: document.timeline?.currentTime ?? null }));
+          } catch {}
+        }
       }
+    }
+    // Pour la boîte noire, toutes les 10 s onglet caché : de quoi sont faites les animations encore en vie (genre, en
+    // boucle ou non, déjà traitées par nous ou non, et les éléments/animations les plus fréquents)
+    let detailA = 0;
+    function decritAnimations() {
+      if (!isHidden() || !document.getAnimations || Date.now() - detailA < 1e4) return;
+      detailA = Date.now();
+      const resume = { total: 0, css: 0, transitions: 0, javascript: 0, enBoucle: 0, dejaTraitees: 0, enPause: 0, enCours: 0, finies: 0 };
+      const signatures = new Map();
+      const parents = new Map();
+      const plus = (carte, cle) => carte.set(cle, (carte.get(cle) ?? 0) + 1);
+      const decrit = (el) => el ? `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""}${[...el.classList].slice(0, 3).map((c) => `.${c}`).join("")}` : "?";
+      for (const anim of document.getAnimations()) {
+        resume.total++;
+        const css = typeof CSSAnimation !== "undefined" && anim instanceof CSSAnimation;
+        const transition = typeof CSSTransition !== "undefined" && anim instanceof CSSTransition;
+        if (css) resume.css++;
+        else if (transition) resume.transitions++;
+        else resume.javascript++;
+        let fin;
+        try {
+          fin = anim.effect?.getComputedTiming().endTime;
+        } catch {}
+        if (!Number.isFinite(fin)) resume.enBoucle++;
+        if (animationsTraitees.has(anim)) resume.dejaTraitees++;
+        if (anim.playState === "paused") resume.enPause++;
+        else if (anim.playState === "running") resume.enCours++;
+        else if (anim.playState === "finished") resume.finies++;
+        const cible = anim.effect?.target;
+        plus(signatures, `${decrit(cible)}${anim.effect?.pseudoElement ?? ""} « ${css ? anim.animationName : transition ? anim.transitionProperty : anim.id || "js"} »${Number.isFinite(fin) ? ` ${Math.round(fin)} ms` : " en boucle"}`);
+        plus(parents, decrit(cible?.parentElement));
+      }
+      const top = (carte) => [...carte].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([cle, n]) => `${n} × ${cle}`);
+      stats.animationsDetail = { ...resume, plusFrequentes: top(signatures), parents: top(parents) };
     }
     const lents = [];
     function disjoncteur(nom) {
@@ -1465,6 +1509,7 @@
         rejoue(timer.callback, timer.args, cache, timer.every ? `intervalle ${timer.every} ms` : `minuterie ${timer.delai} ms`);
       }
       termineAnimations(debut);
+      decritAnimations();
       stats.rejeuMs = Math.round(performance.now() - debut);
       stats.minuteries = timers.size;
       stats.animations = rafQueue.size;

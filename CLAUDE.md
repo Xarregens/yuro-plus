@@ -130,6 +130,18 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   compteur `stats.animationsTerminees` dans la boîte noire. Test `tests/animations.cjs` (la 0.11.3 y échoue : 300
   effets restent). Le site a aussi sa propre pause onglet inactif (`yuroTabInactive`), que notre arrière-plan
   contourne volontairement.
+  4e boîte noire (18/11 17:33, 0.11.6) : correctif PARTIEL — 77 000 animations terminées par le script depuis le
+  chargement, mais encore ≈ 52 000 animations / 53 000 éléments dans la page, toujours +≈150 par combat. Blocage
+  définitif cette fois PENDANT l'onglet caché, dans une minuterie de 80 ms du site (tutoriel :
+  `mergeTutorialObservations` puis `renderTutorial`), sans doute écrasée par le poids de la page. Hypothèses sur le
+  reste : animations en boucle (jamais touchées) ou animations JavaScript (`element.animate`) dont l'événement
+  `finish` (onfinish) n'est, lui aussi, envoyé qu'au rendu. 0.11.7 : pour les animations JS, `AnimationPlaybackEvent
+  "finish"` envoyé par le script après `finish()` ; et `decritAnimations()` (toutes les 10 s onglet caché) remplit
+  `stats.animationsDetail` dans la boîte noire : total, css / transitions / javascript, enBoucle, dejaTraitees,
+  enPause / enCours / finies, 8 signatures les plus fréquentes (élément.classes « nom d'animation » durée) et 8
+  parents les plus fréquents. Le test `animations.cjs` compte les « finish » non fiables (isTrusted false) : seuls à
+  arriver dans un vrai onglet caché (le navigateur de test, lui, n'est jamais vraiment caché). Prochaine boîte noire :
+  lire `animationsDetail` pour viser les effets qui restent.
 - Marché `#market`, onglet « Vendre » (yuroDiag du 17/11/2026) : `#marketWorkspace`, grille `.mkx-own-grid` de
   `button.mkx-own[data-market-sell=id]` (nom `.mkx-own-copy strong`, pastille `.mkx-own-art em` « ×N » = exemplaires
   possédés, confirmé ; le site réserve le dernier exemplaire, donc doublon = ×2+), puces de rareté `.mkx-chips
