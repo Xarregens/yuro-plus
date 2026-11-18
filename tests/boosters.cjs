@@ -38,7 +38,7 @@ function boutique() {
   + '<button type="button" role="radio" class="bv4-chip" data-bv4-pay="ki" aria-checked="' + (src === 'ki') + '">Ki</button>';
  $('#boosterPurchase').innerHTML = '<h2 id="purchaseTitle">Ouvrir Multivers</h2><div class="batch-presets bv4-seg">'
   + [1, 5, 10].map((n) => '<button type="button" data-batch-count="' + n + '" aria-pressed="' + (n === lot) + '">×' + n + '</button>').join('') + '</div>'
-  + '<button type="button" class="bv4-open is-' + src + '" id="bv4Open" data-source="' + src + '"><span class="bv4-open-main">Ouvrir' + (src === 'ki' ? ' ×' + lot : '') + '</span> <span class="bv4-open-pay">' + (src === 'free' ? 'Gratuit' : src === 'quest' ? 'Récompense de quête' : lot * 100 + ' ki') + '</span></button>'
+  + '<button type="button" class="bv4-open is-' + src + '" id="bv4Open" data-source="' + src + '"' + (src !== 'ki' && !window.__reserve[src] ? ' disabled' : '') + '><span class="bv4-open-main">Ouvrir' + (src === 'ki' ? ' ×' + lot : '') + '</span> <span class="bv4-open-pay">' + (src === 'free' ? 'Gratuit' : src === 'quest' ? 'Récompense de quête' : lot * 100 + ' ki') + '</span></button>'
   + '<div class="bv4-pay"><span>Payer avec</span>' + puces + '</div><p class="bv4-note">' + (src !== 'ki' && dispo < lot ? 'Lot ajusté à ta réserve : ' + dispo + ' booster.' : '') + '</p>';
 }
 const front = (code, nom, numero, serie, tag) => '<span class="reveal-front"><span class="summary-card-top"><strong>' + nom + '</strong><span>' + code + '</span></span><span class="summary-card-art"><span>' + numero + '</span></span><span class="summary-card-series">' + serie + '</span></span><span class="summary-copy-tag">' + tag + '</span>';
@@ -77,7 +77,8 @@ document.addEventListener('click', (e) => {
   const src = sourceAuto();
   if (src === 'ki') { window.__clics.ki++; return; }
   const nb = Math.min(lot, window.__reserve[src]);
-  window.__reserve[src] -= nb; choix = null;
+  // window.__basculeAuto === false : comme peut-être le vrai site, la source épuisée reste choisie (bouton grisé)
+  window.__reserve[src] -= nb; choix = window.__basculeAuto === false ? src : null;
   window.__achats.push({ payment: src, quantity: nb });
   enCours = nb;
   etape('dechirer');
@@ -132,12 +133,22 @@ boutique();
     bilanAffiche: document.querySelector('#yuro-plus-boosters [data-yuro-bilan-packs]')?.textContent ?? 'absent',
     boutonRares: document.querySelector('#yuro-plus-boosters [data-yuro-rares]')?.textContent ?? 'absent'
   }));
+  // 2 bis. le site ne passe PAS tout seul aux Quêtes : la source « Gratuit » épuisée reste choisie, bouton grisé,
+  // puce Quêtes disponible. Le script doit choisir la puce Quêtes et ouvrir les 8, toujours sans ki
+  await boot();
+  await page.evaluate(() => { window.__basculeAuto = false; document.getElementById('yuro-plus-rares')?.remove(); yuroPlus.ouvertureAuto(true); });
+  await page.waitForFunction(() => yuroPlus.reglages.ouverture === false, null, { timeout: 25000 }).catch(() => {});
+  await page.waitForTimeout(500);
+  out.sansBascule = await page.evaluate(() => ({
+    achats: window.__achats, ki: window.__clics.ki, puces: window.__clics.puceFree, jaquette: window.__clics.jaquette, rouvrir: window.__clics.rouvrir,
+    diag: [...document.querySelectorAll('body > div > div')].map((d) => d.textContent).find((t) => /arrêtée/.test(t)) ?? 'aucun message'
+  }));
   // 3. rallumé sans aucune réserve gratuite : il s'arrête aussitôt, sans cliquer « Ouvrir » (payé en ki)
   await page.evaluate(() => { document.getElementById('yuro-plus-rares')?.remove(); yuroPlus.ouvertureAuto(true); });
   await page.waitForFunction(() => yuroPlus.reglages.ouverture === false, null, { timeout: 8000 }).catch(() => {});
   await page.waitForTimeout(500);
   out.sansReserve = await page.evaluate(() => ({ eteint: !yuroPlus.reglages.ouverture, ki: window.__clics.ki, ouvrir: window.__clics.ouvrir }));
-  // 4. jamais mémorisé ; le journal, lui, reste
+  // 4. jamais mémorisé ; le journal, lui, reste (3 rares de la séance + 3 de la séance « sans bascule »)
   await page.evaluate(() => yuroPlus.ouvertureAuto(true));
   await boot();
   out.pasMemorise = await page.evaluate(() => ({ off: yuroPlus.reglages.ouverture === false, reglage: /ouverture"/.test(localStorage.getItem('yuro-plus:settings') ?? ''), journal: yuroPlus.cartesRares().length }));
@@ -159,9 +170,12 @@ boutique();
     && JSON.stringify(out.seance.journal) === JSON.stringify(['UR Hidan #889', 'UR Madara #100', 'TRS Goku #007'])
     && out.seance.toastFin && out.seance.panneau && out.seance.eclair.pendant && !out.seance.eclair.apres
     && /10 booster/.test(out.seance.bilanAffiche) && /3 rare/.test(out.seance.bilanAffiche) && out.seance.boutonRares === '✦ Rares (3)'
+    && JSON.stringify(out.sansBascule.achats) === JSON.stringify([{ payment: 'free', quantity: 2 }, { payment: 'quest', quantity: 8 }])
+    && out.sansBascule.ki === 0 && out.sansBascule.puces === 1 && out.sansBascule.jaquette === 0 && out.sansBascule.rouvrir === 0
+    && /plus de boosters gratuits ni de quête.*\[bouton : quest, grisé · puces : ki\]/.test(out.sansBascule.diag)
     && out.sansReserve.eteint && out.sansReserve.ki === 0 && out.sansReserve.ouvrir === 2
-    && out.pasMemorise.off && !out.pasMemorise.reglage && out.pasMemorise.journal === 3
-    && out.manuel.clics === 0 && out.manuel.dernier === 'Alucard' && out.manuel.journal === 4
+    && out.pasMemorise.off && !out.pasMemorise.reglage && out.pasMemorise.journal === 6
+    && out.manuel.clics === 0 && out.manuel.dernier === 'Alucard' && out.manuel.journal === 7
     && typeof out.vider === 'string'
     && errors.length === 0;
   console.log(JSON.stringify(out, null, 1));

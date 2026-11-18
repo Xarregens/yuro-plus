@@ -52,11 +52,19 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   · 40 cartes » ; 10 tuiles par page, pager `#packSummaryPager [data-summary-page]`) → `#openAnotherPack` « Ouvrir
   encore des boosters ↗ » qui ramène à la boutique ; `#reopenSamePack` « Rouvrir » (jamais cliqué : paiement
   inconnu). Le dialogue refermé perd son attribut `open` (une ouverture n'est « en cours » que si une étape est
-  visible). « Ouverture auto » (`reglages.ouverture`, interrupteur id `pk`) : remet la puce Gratuit/Quêtes si le
-  joueur a pris Ki, choisit ×10, clique `#bv4Open` SEULEMENT si `data-source` ∈ {free, quest} (`SOURCE_GRATUITE`,
-  vérifié par la contre-épreuve de `tests/boosters.cjs`), déchire, passe, lit les rares (pages tournées si les
-  pastilles en annoncent plus), révèle une meilleure carte face cachée si besoin, revient à la boutique ; arrêt
-  (`finDesGratuits`) quand le bouton ne propose plus que du ki et qu'aucune puce gratuite ne reste. Journal des
+  visible). Réponse de `POST /api/booster` : `freeBoosters`, `freeBoosterAt`, `questBoosters`, `referralBoosters`
+  (parrainage, 3e source gratuite), `ki`, `revision`. JAMAIS VU : l'état de la boutique avec des boosters de quête en
+  réserve (toutes les captures sont prises après) — nom exact de la puce/`data-source` Quêtes et bascule du site non
+  confirmés. Le 18/11 le propriétaire signale que les boosters de quête ne s'ouvrent pas (0.11.0) ; hypothèse : le
+  site garde « Gratuit » épuisé choisi, bouton grisé, au lieu de passer aux Quêtes.
+  « Ouverture auto » (`reglages.ouverture`, interrupteur id `pk`) : choisit une puce gratuite (`pucesGratuites`) si le
+  bouton propose du ki OU reste grisé sur une source épuisée, choisit ×10, clique `#bv4Open` SEULEMENT si
+  `sourceGratuite` (data-source ∈ free/quest(s)/referral(s) ou classe is-free/is-quest/is-referral, et jamais rien
+  qui contienne « ki » ; vérifié par la contre-épreuve de `tests/boosters.cjs`), déchire, passe, lit les rares (pages
+  tournées si les pastilles en annoncent plus), révèle une meilleure carte face cachée si besoin, revient à la
+  boutique ; arrêt (`finDesGratuits`) quand le bouton propose du ki ou reste grisé ET qu'aucune puce gratuite ne
+  reste. Le message d'arrêt (et la console) donne `etatBoutique()` : source du bouton, grisé ou non, puces présentes
+  — de quoi diagnostiquer une source non reconnue. Journal des
   UR/LR/EX/TRS (`yuro-plus:cartes-rares`, 300 max) alimenté même en ouverture manuelle ; bilan `bilanPacks` /
   `yuroPlus.packs` ; vitesse : ticker 100 ms (`ouvertureMs`) et « mode éclair » (`eclair`, mémorisé sous
   `ouvertureEclair`) qui raccourcit à 1 ms animations/transitions de `#packDialog` pendant la séance (jamais 0 ms).

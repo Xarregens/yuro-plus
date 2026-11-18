@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.11.0
+// @version      0.11.1
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini, « Ouverture auto » des boosters gratuits et de quête avec journal des cartes rares, filtre « Doublons » au marché ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.11.0";
+  const YURO_VERSION = "0.11.1";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -529,44 +529,59 @@
     }
     return null;
   }
-  const SOURCE_GRATUITE = /^(free|quests?)$/;
+  // sources gratuites, d'après les paiements que le site envoie (payment "free" / "quest") et les réserves qu'il
+  // renvoie (freeBoosters, questBoosters, referralBoosters = parrainage). Tout ce qui ressemble à du ki est refusé,
+  // même si un autre indice disait « gratuit ».
+  const SOURCE_GRATUITE = /^(free|quests?|referrals?)$/;
   const boutonOuvrir = () => {
     const bouton = document.querySelector("#bv4Open");
     return visible(bouton) ? bouton : null;
   };
-  const sourceGratuite = (bouton) => SOURCE_GRATUITE.test(bouton?.dataset.source ?? "");
-  // une source gratuite encore disponible mais pas choisie (le joueur a pris « Ki ») : la reprendre — choisir le moyen
-  // de paiement ne dépense rien
-  const puceGratuite = () => [...document.querySelectorAll(".bv4-pay [data-bv4-pay]")].find((puce) => SOURCE_GRATUITE.test(puce.dataset.bv4Pay ?? "") && visible(puce));
+  const sourceGratuite = (bouton) => {
+    if (!bouton) return false;
+    const source = bouton.dataset.source ?? "";
+    if (/ki/i.test(source) || bouton.classList.contains("is-ki")) return false;
+    return SOURCE_GRATUITE.test(source) || [...bouton.classList].some((classe) => /^is-(free|quests?|referrals?)$/.test(classe));
+  };
+  const pucesGratuites = () => [...document.querySelectorAll(".bv4-pay [data-bv4-pay]")].filter((puce) => SOURCE_GRATUITE.test(puce.dataset.bv4Pay ?? "") && visible(puce) && !puce.disabled);
+  const puceGratuite = () => pucesGratuites()[0];
+  // ce que voyait le script, pour le message d'arrêt (et le diagnostic si une source n'est pas reconnue)
+  const etatBoutique = () => {
+    const bouton = boutonOuvrir();
+    const puces = [...document.querySelectorAll(".bv4-pay [data-bv4-pay]")].map((puce) => `${puce.dataset.bv4Pay}${puce.getAttribute("aria-checked") === "true" ? " (choisie)" : ""}`);
+    return `bouton : ${bouton ? `${bouton.dataset.source ?? "?"}${bouton.disabled ? ", grisé" : ""}` : "absent"} · puces : ${puces.join(", ") || "aucune"}`;
+  };
+  // une source gratuite encore disponible mais pas choisie — le joueur a pris « Ki », ou le site garde la source
+  // épuisée (bouton grisé) au lieu de passer aux Quêtes : la choisir. Choisir le moyen de paiement ne dépense rien.
   const checkSource = createWatcher({
     trouve: () => {
       if (!reglages.ouverture || dialoguePackAffiche()) return null;
       const bouton = boutonOuvrir();
-      if (!bouton || sourceGratuite(bouton)) return null;
-      const puce = puceGratuite();
-      return puce && puce.getAttribute("aria-checked") !== "true" ? puce : null;
+      if (!bouton || (sourceGratuite(bouton) && !bouton.disabled)) return null;
+      return pucesGratuites().find((puce) => puce.getAttribute("aria-checked") !== "true") ?? null;
     },
     nomAction: "paiement remis sur les boosters gratuits",
     raisonLente: "paiement en ki sélectionné",
     compte: () => {},
     delai: () => reglages.ouvertureMs
   });
-  // plus aucune source gratuite (le bouton propose du ki et il n'y a plus de puce Gratuit / Quêtes) : fin de séance,
-  // après un court délai pour laisser la boutique finir de se redessiner
+  // plus aucune source gratuite : le bouton propose du ki, ou reste grisé sur une source épuisée, et il n'y a plus
+  // aucune puce Gratuit / Quêtes / Parrainage. Fin de séance, après un court délai pour laisser la boutique se redessiner
   function finDesGratuits() {
     if (!reglages.ouverture || dialoguePackAffiche()) {
       desactiveDepuis.fin = null;
       return;
     }
     const bouton = boutonOuvrir();
-    if (!bouton || sourceGratuite(bouton) || puceGratuite()) {
+    if (!bouton || (sourceGratuite(bouton) && !bouton.disabled) || puceGratuite()) {
       desactiveDepuis.fin = null;
       return;
     }
     desactiveDepuis.fin ??= Date.now();
     if (Date.now() - desactiveDepuis.fin > 1500) {
       desactiveDepuis.fin = null;
-      arretOuverture("plus de boosters gratuits ni de quête (ils ne s’ouvrent que dans le pack Multivers) — le script ne paie jamais en ki");
+      console.info("Yuro Plus : fin de l’ouverture auto,", etatBoutique());
+      arretOuverture(`plus de boosters gratuits ni de quête (ils ne s’ouvrent que dans le pack Multivers) — le script ne paie jamais en ki [${etatBoutique()}]`);
     }
   }
   // lot au maximum (×10) : le site l'ajuste de lui-même à la réserve gratuite
@@ -590,7 +605,10 @@
       if (!reglages.ouverture || dialoguePackAffiche()) return null;
       const bouton = boutonOuvrir();
       if (!bouton || !sourceGratuite(bouton) || lotDix()) return null;
-      return patiente("boutique", bouton, "« Ouvrir » est resté désactivé");
+      // grisé : une autre source gratuite → checkSource la choisit ; plus aucune → finDesGratuits arrête la séance
+      if (bouton.disabled && !pucesGratuites().every((puce) => puce.getAttribute("aria-checked") === "true")) return null;
+      if (bouton.disabled && !puceGratuite()) return null;
+      return patiente("boutique", bouton, `« Ouvrir » est resté grisé [${etatBoutique()}]`);
     },
     nomAction: "ouverture lancée depuis la boutique",
     raisonLente: "boutique restée affichée",
