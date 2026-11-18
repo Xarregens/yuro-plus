@@ -4,19 +4,19 @@ Un seul programme : `yuroPlus.user.js`, userscript Tampermonkey pour le jeu yuro
 (Xarregens) n'est pas développeur : parler simplement, livrer des versions complètes, tester avant d'envoyer, ne jamais
 toucher au vrai site autrement qu'en lecture. Même façon de travailler que le dépôt frère `kyara-plus` (Kyara Plus).
 
-- Ce que fait le script (0.10.x) : relance immédiate du replay auto en farm (`createWatcher`), « Suivant auto » dans le
+- Ce que fait le script (0.11.x) : relance immédiate du replay auto en farm (`createWatcher`), « Suivant auto » dans le
   Château de l'infini et « Rejouer auto » en Halloween (interrupteurs du script montés dans le bandeau par
-  `mountToggle`, remontés sur mutation pour ne pas clignoter), série V · D · bonbons en Halloween, « Citrouilles
-  auto » + journal des cartes rares dans la boutique Halloween (panneau « ✦ Rares » sur le site, ouvert tout seul en
-  fin de séance), et maintien du jeu quand l'onglet est caché (`installFond`). Réglages dans l'objet `reglages`,
-  mémorisés sous `yuro-plus:settings` (sauf `citrouilles`, jamais mémorisé) ; commandes console `yuroPlus.*`
-  (relanceAuto, relanceRapide, suivantAuto, halloweenAuto, citrouillesAuto, citrouillesEclair, cartesRares,
+  `mountToggle`, remontés sur mutation pour ne pas clignoter), série V · D · bonbons en Halloween, « Ouverture
+  auto » des boosters gratuits et de quête + journal des cartes rares (panneau « ✦ Rares » sur le site, ouvert tout
+  seul en fin de séance), et maintien du jeu quand l'onglet est caché (`installFond`). Réglages dans l'objet `reglages`,
+  mémorisés sous `yuro-plus:settings` (sauf `ouverture`, jamais mémorisé) ; commandes console `yuroPlus.*`
+  (relanceAuto, relanceRapide, suivantAuto, halloweenAuto, ouvertureAuto, ouvertureEclair, cartesRares,
   doublons, arrierePlan). Au marché (Vendre), puce « Doublons ».
 - Toute connaissance du site vient des enregistrements `yuroDiag` (page(), menu(), download()) fournis par le
   propriétaire : pour un écran inconnu ou un bogue, demander un `yuroDiag.page()` pris au bon moment avant de coder.
   Le script ne clique que les boutons que le joueur cliquerait, jamais ceux qui dépensent, et ne forge aucune requête.
-  Unique exception, demandée par le propriétaire : « Citrouilles auto » (boutique Halloween) clique les boutons
-  d'ouverture qui dépensent des bonbons — c'est son objet même ; en contrepartie il est toujours éteint au chargement.
+  (Pendant Halloween, « Citrouilles auto » faisait exception — bonbons dépensés à la demande du propriétaire ; depuis
+  la 0.11.0, « Ouverture auto » n'ouvre QUE des boosters gratuits ou de quête, jamais payés en ki.)
 - Version : `// @version` **et** `var YURO_VERSION`, à incrémenter à chaque publication. Garder `@updateURL` /
   `@downloadURL` vers ce dépôt. Publier = commit sur `main` (Tampermonkey met à jour depuis l'URL Raw).
 - Vérifier : `node --check yuroPlus.user.js`, puis `cd tests && node yuro.cjs ../yuroPlus.user.js` (navigateur simulé,
@@ -36,30 +36,31 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   enchaîne seul : rien à cliquer, pas de secours possible). ÉTEINT → grand écran `hw-end` won/lost avec
   `[data-hw26-play]` « Affronter à nouveau », `[data-hw26-open]` « Ouvrir une citrouille » (DÉPENSE des bonbons, ne
   jamais cliquer) et `[data-hw26-back]`. Le bandeau du mode se reconnaît à l'eyebrow « HALLOWEEN ».
-- Boutique Halloween `#hw26` (enregistrements du 10/11/2026) : quantité `[data-hw26-qty]` ×1/×5/×10 (plafond du site :
-  10) + stepper `[data-hw26-step]`, « Ouvrir ×N » `button.hw26-open-main` (débite N × 100 bonbons, le tirage se joue
-  côté client : pas de requête dédiée, c'est `PUT /api/save` qui enregistre). S'ouvre alors `dialog#packDialog`
-  (partagé avec les boosters classiques : n'agir que si `#tearPack` porte la classe `hw26-pack` ; ATTENTION, refermé
-  il garde son attribut `open` en restant caché — une ouverture n'est « en cours » que si une étape est réellement
-  visible, sinon le démarrage depuis la boutique ne part jamais, bogue de la 0.9.0) : citrouille
-  `#tearPack` « OUVRE ! » → défilé carte par carte, sauté par `#skipPackReview` « Tout passer » → récapitulatif :
-  tuiles `.reveal-card.pack-summary-tile` dans `#packCards` (nom `.summary-card-top strong`, code de rareté
-  `.summary-card-top span` : C/R/SR/SSR/UR/LR/TRS, numéro `.summary-card-art span`, série `.summary-card-series`,
-  étiquette `.summary-copy-tag` ; triées plus rares en premier, 10 par page, pager `#packSummaryPager
-  [data-summary-page]`), pastilles de comptage `.qol-pack-recap` dans `#revealHint` (« 10 citrouilles · 50 cartes »),
-  barre `.pack-actions` avec `#openAnotherPack` « Ouvrir encore ×N » qui reboucle sur la citrouille. La meilleure
-  carte (tuile `big-pull-hidden`, classe `revealed` une fois retournée) doit être révélée d'un clic — le joueur le
-  fait à chaque fois, le script aussi, et c'est là que nom et rareté deviennent sûrs dans la page. « Citrouilles
-  auto » enchaîne ces clics ; le journal des UR/LR/EX/TRS (`yuro-plus:cartes-rares`, plafonné à 300) est alimenté même
-  en ouverture manuelle ; arrêt automatique quand le site laisse l'ouverture désactivée plus de `patienceMs` (8 s :
-  une désactivation brève pendant une animation ne compte pas). Vitesse : la chaîne
-  bat sur son propre ticker 100 ms avec le délai `citrouillesMs` (100 ms, au lieu de `rapideMs`), et le « mode
-  éclair » (`eclair`, mémorisé sous `citrouillesEclair`) raccourcit à 1 ms animations/transitions dans `#packDialog`
-  seulement, pendant la séance seulement (jamais 0 ms : animationend/transitionend doivent continuer d'arriver au
-  site). La lecture des rares reste garantie : `litRecapitulatif` attend que compte et tuiles soient affichés, et
-  `recapLu` relit la page avant d'autoriser « Ouvrir encore ». Historique visible sur le site : bouton « ✦ Rares (N) »
-  à côté de l'interrupteur, panneau `#yuro-plus-rares` (liste, vidage), ouvert automatiquement en fin de séance s'il y
-  a eu des rares.
+- Boosters `#boosters` (enregistrements du 18/11/2026 ; l'événement Halloween est fini, sa boutique `#hw26` a
+  disparu) : section `#boosterShop` (`data-sel` = pack choisi ; jaquettes `.bv4-pack` « Ouvrir ici » — NE JAMAIS les
+  cliquer), quantité `.bv4-seg [data-batch-count]` ×1/×5/×10, bouton `#bv4Open` dont `data-source` (et la classe
+  `is-…`) dit ce qu'il dépense : `free` (« Gratuit », réserve qui se recharge toutes les 10 min), `quest` (« Récompense
+  de quête »), `ki` (« Ouvrir ×10 · 1 000 ki »). Le site prend seul la source gratuite tant qu'il en reste et ajuste
+  le lot à la réserve, puis BASCULE SUR LE KI. Puces `.bv4-pay [data-bv4-pay=free|quest|ki]` (seules les sources
+  disponibles). Requête `POST /api/booster {packId, quantity, payment, expectedRevision}`. Gratuits et quêtes ne
+  s'ouvrent que dans Multivers (100 ki le pack sinon ; prix des autres packs : Éclipse 1000, Shōnen/Shōjo/Isekai 500,
+  Prestige en tokens). La section `#boosterPurchase` se redessine d'après son attribut `data-html` : notre encart
+  `#yuro-plus-boosters` est monté JUSTE APRÈS elle, jamais dedans. Dialogue `#packDialog` (le même qu'à Halloween) :
+  `#tearPack` → défilé, `#skipPackReview` « Tout passer » → récapitulatif (tuiles `.reveal-card.pack-summary-tile`,
+  nom `.summary-card-top strong`, rareté `.summary-card-top span`, numéro `.summary-card-art span`, série
+  `.summary-card-series`, étiquette `.summary-copy-tag` ; pastilles `.qol-pack-recap` dans `#revealHint` « 8 boosters
+  · 40 cartes » ; 10 tuiles par page, pager `#packSummaryPager [data-summary-page]`) → `#openAnotherPack` « Ouvrir
+  encore des boosters ↗ » qui ramène à la boutique ; `#reopenSamePack` « Rouvrir » (jamais cliqué : paiement
+  inconnu). Le dialogue refermé perd son attribut `open` (une ouverture n'est « en cours » que si une étape est
+  visible). « Ouverture auto » (`reglages.ouverture`, interrupteur id `pk`) : remet la puce Gratuit/Quêtes si le
+  joueur a pris Ki, choisit ×10, clique `#bv4Open` SEULEMENT si `data-source` ∈ {free, quest} (`SOURCE_GRATUITE`,
+  vérifié par la contre-épreuve de `tests/boosters.cjs`), déchire, passe, lit les rares (pages tournées si les
+  pastilles en annoncent plus), révèle une meilleure carte face cachée si besoin, revient à la boutique ; arrêt
+  (`finDesGratuits`) quand le bouton ne propose plus que du ki et qu'aucune puce gratuite ne reste. Journal des
+  UR/LR/EX/TRS (`yuro-plus:cartes-rares`, 300 max) alimenté même en ouverture manuelle ; bilan `bilanPacks` /
+  `yuroPlus.packs` ; vitesse : ticker 100 ms (`ouvertureMs`) et « mode éclair » (`eclair`, mémorisé sous
+  `ouvertureEclair`) qui raccourcit à 1 ms animations/transitions de `#packDialog` pendant la séance (jamais 0 ms).
+  Panneau « ✦ Rares (N) » `#yuro-plus-rares`, ouvert seul en fin de séance s'il y a eu des rares.
 - Arrière-plan : les vérifications battent dans un Web Worker (créé depuis un blob ; si le site ajoutait une CSP
   worker-src, retomber sur setInterval). `installFond` masque document.hidden/visibilityState, retient
   visibilitychange, et rejoue rAF + setTimeout/setInterval posés pendant que l'onglet est caché (ids ≥ 2e9 pour ne

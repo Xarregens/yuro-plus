@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.10.4
-// @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini, « Citrouilles auto » et journal des cartes rares en Halloween, filtre « Doublons » au marché ; commandes d'enregistrement yuroDiag.
+// @version      0.11.0
+// @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini, « Ouverture auto » des boosters gratuits et de quête avec journal des cartes rares, filtre « Doublons » au marché ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
 // @supportURL   https://github.com/xarregens/yuro-plus/issues
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.10.4";
+  const YURO_VERSION = "0.11.0";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -231,14 +231,13 @@
     halloween: readSettings().halloweenAuto === true,
     // Marché, onglet Vendre : ne montrer que les cartes possédées en 2 exemplaires ou plus (puce « Doublons »)
     doublons: readSettings().marcheDoublons === true,
-    // Boutique Halloween : ouvrir les citrouilles en boucle (« Citrouilles auto »). Chaque ouverture DÉPENSE des
-    // bonbons : jamais mémorisé, toujours éteint au chargement, le joueur rallume à chaque séance en connaissance
-    // de cause. C'est la seule exception à « jamais les boutons qui dépensent », voulue par le propriétaire.
-    citrouilles: false,
-    // délai avant chaque clic de la chaîne citrouilles : bien plus court que rapideMs, l'enchaînement n'a pas
+    // Boosters : ouvrir en boucle les boosters GRATUITS et DE QUÊTE (« Ouverture auto »), jamais ceux payés en ki.
+    // Pas mémorisé : toujours éteint au chargement, le joueur l'allume quand il veut vider ses réserves.
+    ouverture: false,
+    // délai avant chaque clic de la chaîne d'ouverture : bien plus court que rapideMs, l'enchaînement n'a pas
     // d'écran de fin à laisser respirer (la lecture des rares est garantie avant « Ouvrir encore », quelle que
     // soit la vitesse)
-    citrouillesMs: 100,
+    ouvertureMs: 100,
     // un bouton d'ouverture désactivé n'arrête la boucle que s'il le reste aussi longtemps : le site le coupe
     // aussi brièvement pendant ses animations
     patienceMs: 8e3,
@@ -249,9 +248,9 @@
     disjoncteurFenetreMs: 18e4,
     // au-delà de ce nombre de boutons recréés en une seconde, on cesse de les remonter sur mutation (voir le frein)
     remontagesMax: 30,
-    // « mode éclair » : pendant que Citrouilles auto tourne, raccourcir les animations du site dans le dialogue
-    // d'ouverture (et seulement là). yuroPlus.citrouillesEclair(false) si un écran se comporte mal (mémorisé).
-    eclair: readSettings().citrouillesEclair !== false
+    // « mode éclair » : pendant que Ouverture auto tourne, raccourcir les animations du site dans le dialogue
+    // d'ouverture (et seulement là). yuroPlus.ouvertureEclair(false) si un écran se comporte mal (mémorisé).
+    eclair: readSettings().ouvertureEclair !== false
   };
   const END_SCREEN = "section.story-end-screen.farm-end";
   const RESTART = "[data-farm-start]";
@@ -401,26 +400,27 @@
       if (span.textContent !== values[index]) span.textContent = values[index];
     });
   }
-  // ---- Boutique Halloween : « Citrouilles auto » + journal des cartes rares ----
-  // Observé (enregistrements du 10/11/2026, page #hw26) : le joueur choisit la quantité ([data-hw26-qty], plafond 10)
-  // puis « Ouvrir ×N » (button.hw26-open-main, débite N × 100 bonbons) ouvre le dialogue #packDialog :
-  // 1. citrouille à ouvrir : #tearPack.hw26-pack « OUVRE ! » (clic ou Entrée) ;
-  // 2. défilé des cartes une à une : « » Tout passer » #skipPackReview saute au récapitulatif ;
-  // 3. récapitulatif : tuiles .reveal-card.pack-summary-tile dans #packCards (nom .summary-card-top strong, code de
-  //    rareté .summary-card-top span : C/R/SR/SSR/UR/LR/TRS, numéro .summary-card-art span, série
-  //    .summary-card-series ; triées plus rares en premier, 10 par page, pager #packSummaryPager
-  //    [data-summary-page]), pastilles de comptage .qol-pack-recap (« UR ×1 · SR ×2 … ») dans #revealHint
-  //    (« 10 citrouilles · 50 cartes »), barre .pack-actions avec « 🎃 Ouvrir encore ×N » #openAnotherPack qui
-  //    renvoie à l'étape 1. La meilleure carte (tuile big-pull-hidden, classe revealed une fois retournée) doit être
-  //    RÉVÉLÉE d'un clic — le joueur le fait à chaque fois — avant que l'enchaînement reparte : le script la clique
-  //    donc aussi (rien n'est dépensé), et c'est au passage là que nom et rareté deviennent sûrs dans la page.
-  // « Citrouilles auto » enchaîne ces clics-là (jamais la pagination de collection, jamais « Voir ma collection »).
+  // ---- Boosters : « Ouverture auto » (packs gratuits et de quête) + journal des cartes rares ----
+  // Observé (enregistrements du 18/11/2026, page #boosters, nouvelle boutique après la fin de l'événement Halloween) :
+  // section #boosterShop (data-sel = pack choisi), quantité .bv4-seg [data-batch-count] ×1/×5/×10, et le bouton
+  // #bv4Open dont data-source dit ce qu'il va dépenser : "free" (« Gratuit », réserve qui se recharge toutes les
+  // 10 min), "quest" (« Récompense de quête »), ou "ki" (« Ouvrir ×10 · 1 000 ki »). Le site prend tout seul une source
+  // gratuite tant qu'il en reste et ajuste le lot à la réserve (« Lot ajusté à ta réserve : 1 booster »), puis bascule
+  // sur le ki. Puces de paiement .bv4-pay [data-bv4-pay=free|quest|ki] (seulement les sources disponibles). Requête :
+  // POST /api/booster {packId, quantity, payment:"free"|"quest", expectedRevision}. Les boosters gratuits et de quête
+  // ne s'ouvrent que dans Multivers. La section #boosterPurchase se redessine d'après son attribut data-html : notre
+  // bouton se monte À CÔTÉ (#yuro-plus-boosters), jamais dedans.
+  // Dialogue #packDialog (le même qu'à Halloween) : #tearPack (clic) → défilé, « Tout passer » #skipPackReview →
+  // récapitulatif (tuiles .pack-summary-tile, pastilles .qol-pack-recap, #revealHint « 8 boosters · 40 cartes », pager
+  // #packSummaryPager) → « Ouvrir encore des boosters ↗ » #openAnotherPack, qui ramène à la boutique.
+  // RÈGLE DE SÉCURITÉ : #bv4Open n'est cliqué QUE si son data-source est free ou quest. Jamais le ki, jamais une
+  // jaquette de pack (« Ouvrir ici »), jamais « Rouvrir » #reopenSamePack (on ne sait pas ce qu'il paierait). Plus de
+  // source gratuite : arrêt, bilan et panneau des rares.
   // Les cartes UR, LR, EX et TRS sont notées dans un journal mémorisé (yuroPlus.cartesRares()), que l'ouverture soit
-  // automatique ou manuelle. Arrêt de la boucle : bouton éteint, bouton d'ouverture désactivé (plus de bonbons), ou
-  // trois clics sans effet (garde-fou de createWatcher).
+  // automatique ou manuelle.
   const RARE = /^(UR|LR|EX|TRS)$/i;
   const RARES_KEY = "yuro-plus:cartes-rares";
-  const citrouilles = { ouvertes: 0, cartes: 0, rares: 0 };
+  const bilanPacks = { ouvertes: 0, cartes: 0, rares: 0 };
   const lireRares = () => {
     try {
       return JSON.parse(localStorage.getItem(RARES_KEY)) ?? [];
@@ -435,21 +435,20 @@
     if (journal.length > 300) journal.splice(0, journal.length - 300);
     localStorage.setItem(RARES_KEY, JSON.stringify(journal));
     raresTotal = journal.length;
-    citrouilles.rares++;
+    bilanPacks.rares++;
     toast(`Yuro Plus : ✦ carte rare ! ${carte.rarete} ${carte.nom} (${carte.numero}${carte.serie ? `, ${carte.serie}` : ""})`);
     if (document.getElementById("yuro-plus-rares")) montrePanneauRares(); // panneau ouvert : rafraîchi en direct
   }
-  // le dialogue d'ouverture n'est le nôtre que pour les citrouilles (les boosters classiques passent par le même
-  // #packDialog, sans la classe hw26-pack) : ne jamais agir ailleurs
-  function hw26Dialog() {
+  // le dialogue d'ouverture des packs (le même pour tous les boosters depuis Halloween)
+  function dialoguePack() {
     const dialog = document.querySelector("#packDialog[open]");
-    return dialog?.querySelector("#tearPack.hw26-pack") ? dialog : null;
+    return dialog?.querySelector("#tearPack") ? dialog : null;
   }
   // …et il peut garder son attribut « open » tout en étant caché une fois refermé : vu depuis la boutique, une
   // ouverture n'est « en cours » que si l'une de ses étapes est réellement affichée (sinon le premier « Ouvrir ×N »
   // ne partirait jamais — bogue du démarrage depuis la boutique en 0.9.0)
-  function hw26DialogAffiche() {
-    const dialog = hw26Dialog();
+  function dialoguePackAffiche() {
+    const dialog = dialoguePack();
     if (!dialog) return null;
     const enCours = ["#tearPack", "#skipPackReview", "#openAnotherPack", "#keepCards"].some((selecteur) => visible(dialog.querySelector(selecteur)));
     return enCours ? dialog : null;
@@ -472,21 +471,21 @@
     }
   }
   function litRecapitulatif() {
-    const dialog = hw26Dialog();
+    const dialog = dialoguePack();
     if (!dialog || !visible(dialog.querySelector("#openAnotherPack"))) {
       tirage = null;
       return;
     }
     if (!tirage) {
       // nouveau récapitulatif : compter l'ouverture, et lire sur les pastilles combien de rares sont annoncées.
-      // Tant que le compte de citrouilles ou les tuiles ne sont pas affichés, l'écran est encore en train de se
+      // Tant que le compte de boosters (« 8 boosters · 40 cartes ») ou les tuiles ne sont pas affichés, l'écran est encore en train de se
       // construire : attendre le battement suivant (indispensable à grande vitesse, sinon « Ouvrir encore »
       // partirait avant la lecture et des rares seraient perdues).
       const hint = dialog.querySelector("#revealHint")?.textContent ?? "";
-      const nbCitrouilles = parseInt(hint.match(/(\d+)\s*citrouille/)?.[1] ?? "", 10) || 0;
-      if (!nbCitrouilles || !dialog.querySelector("#packCards .reveal-card.pack-summary-tile")) return;
-      citrouilles.ouvertes += nbCitrouilles;
-      citrouilles.cartes += parseInt(hint.match(/(\d+)\s*carte/)?.[1] ?? "", 10) || 0;
+      const nbBoosters = parseInt(hint.match(/(\d+)\s*(?:booster|citrouille)/)?.[1] ?? "", 10) || 0;
+      if (!nbBoosters || !dialog.querySelector("#packCards .reveal-card.pack-summary-tile")) return;
+      bilanPacks.ouvertes += nbBoosters;
+      bilanPacks.cartes += parseInt(hint.match(/(\d+)\s*carte/)?.[1] ?? "", 10) || 0;
       let attendues = 0;
       for (const chip of dialog.querySelectorAll(".qol-pack-recap i")) {
         const code = chip.querySelector("b")?.textContent?.trim() ?? "";
@@ -507,17 +506,17 @@
     const suivantes = dialog.querySelector("#packSummaryPager [data-summary-page]:last-of-type");
     return !suivantes || suivantes.disabled;
   }
-  function arretCitrouilles(raison) {
-    if (!reglages.citrouilles) return;
-    reglages.citrouilles = false;
+  function arretOuverture(raison) {
+    if (!reglages.ouverture) return;
+    reglages.ouverture = false;
     repaintToggle("pk", false);
-    toast(`Yuro Plus : Citrouilles auto arrêté — ${raison}. Bilan : ${citrouilles.ouvertes} citrouille(s), ${citrouilles.cartes} cartes, ${citrouilles.rares} rare(s).`);
+    toast(`Yuro Plus : Ouverture auto arrêtée — ${raison}. Bilan : ${bilanPacks.ouvertes} booster(s), ${bilanPacks.cartes} cartes, ${bilanPacks.rares} rare(s).`);
     majEclair(); // rendre tout de suite ses animations au dialogue
-    if (citrouilles.rares > 0) montrePanneauRares(); // récap de fin de séance : les rares trouvées, sans console
+    if (bilanPacks.rares > 0) montrePanneauRares(); // récap de fin de séance : les rares trouvées, sans console
   }
-  // un bouton d'ouverture désactivé ne veut pas toujours dire « plus de bonbons » : le site le coupe aussi le temps
+  // un bouton d'ouverture désactivé ne veut pas toujours dire « plus rien à ouvrir » : le site le coupe aussi le temps
   // d'une animation. On ne s'arrête que s'il le reste au-delà de patienceMs.
-  const desactiveDepuis = { boutique: null, encore: null };
+  const desactiveDepuis = { boutique: null, encore: null, fin: null };
   function patiente(cle, bouton, raison) {
     if (!bouton.disabled) {
       desactiveDepuis[cle] = null;
@@ -526,49 +525,104 @@
     desactiveDepuis[cle] ??= Date.now();
     if (Date.now() - desactiveDepuis[cle] > reglages.patienceMs) {
       desactiveDepuis[cle] = null;
-      arretCitrouilles(raison);
+      arretOuverture(raison);
     }
     return null;
   }
-  // boutique (dialogue fermé) : cliquer « Ouvrir ×N » avec la quantité que le joueur a choisie
+  const SOURCE_GRATUITE = /^(free|quests?)$/;
+  const boutonOuvrir = () => {
+    const bouton = document.querySelector("#bv4Open");
+    return visible(bouton) ? bouton : null;
+  };
+  const sourceGratuite = (bouton) => SOURCE_GRATUITE.test(bouton?.dataset.source ?? "");
+  // une source gratuite encore disponible mais pas choisie (le joueur a pris « Ki ») : la reprendre — choisir le moyen
+  // de paiement ne dépense rien
+  const puceGratuite = () => [...document.querySelectorAll(".bv4-pay [data-bv4-pay]")].find((puce) => SOURCE_GRATUITE.test(puce.dataset.bv4Pay ?? "") && visible(puce));
+  const checkSource = createWatcher({
+    trouve: () => {
+      if (!reglages.ouverture || dialoguePackAffiche()) return null;
+      const bouton = boutonOuvrir();
+      if (!bouton || sourceGratuite(bouton)) return null;
+      const puce = puceGratuite();
+      return puce && puce.getAttribute("aria-checked") !== "true" ? puce : null;
+    },
+    nomAction: "paiement remis sur les boosters gratuits",
+    raisonLente: "paiement en ki sélectionné",
+    compte: () => {},
+    delai: () => reglages.ouvertureMs
+  });
+  // plus aucune source gratuite (le bouton propose du ki et il n'y a plus de puce Gratuit / Quêtes) : fin de séance,
+  // après un court délai pour laisser la boutique finir de se redessiner
+  function finDesGratuits() {
+    if (!reglages.ouverture || dialoguePackAffiche()) {
+      desactiveDepuis.fin = null;
+      return;
+    }
+    const bouton = boutonOuvrir();
+    if (!bouton || sourceGratuite(bouton) || puceGratuite()) {
+      desactiveDepuis.fin = null;
+      return;
+    }
+    desactiveDepuis.fin ??= Date.now();
+    if (Date.now() - desactiveDepuis.fin > 1500) {
+      desactiveDepuis.fin = null;
+      arretOuverture("plus de boosters gratuits ni de quête (ils ne s’ouvrent que dans le pack Multivers) — le script ne paie jamais en ki");
+    }
+  }
+  // lot au maximum (×10) : le site l'ajuste de lui-même à la réserve gratuite
+  const lotDix = () => {
+    const dix = document.querySelector('.bv4-seg [data-batch-count="10"]');
+    return dix && visible(dix) && dix.getAttribute("aria-pressed") !== "true" ? dix : null;
+  };
+  const checkLot = createWatcher({
+    trouve: () => {
+      if (!reglages.ouverture || dialoguePackAffiche() || !sourceGratuite(boutonOuvrir())) return null;
+      return lotDix();
+    },
+    nomAction: "lot de 10 choisi",
+    raisonLente: "lot plus petit sélectionné",
+    compte: () => {},
+    delai: () => reglages.ouvertureMs
+  });
+  // boutique (dialogue fermé) : « Ouvrir », SEULEMENT si le site le fait payer en Gratuit ou en Quêtes
   const checkOuvrir = createWatcher({
     trouve: () => {
-      if (!reglages.citrouilles || hw26DialogAffiche()) return null;
-      const bouton = document.querySelector("button.hw26-open-main");
-      if (!visible(bouton)) return null;
-      return patiente("boutique", bouton, "« Ouvrir » est resté désactivé (plus assez de bonbons ?)");
+      if (!reglages.ouverture || dialoguePackAffiche()) return null;
+      const bouton = boutonOuvrir();
+      if (!bouton || !sourceGratuite(bouton) || lotDix()) return null;
+      return patiente("boutique", bouton, "« Ouvrir » est resté désactivé");
     },
     nomAction: "ouverture lancée depuis la boutique",
     raisonLente: "boutique restée affichée",
     compte: () => {},
-    delai: () => reglages.citrouillesMs
+    delai: () => reglages.ouvertureMs
   });
-  // étape 1 : la citrouille elle-même
-  const checkCitrouille = createWatcher({
+  // étape 1 : déchirer le booster
+  const checkDechire = createWatcher({
     trouve: () => {
-      if (!reglages.citrouilles) return null;
-      const pack = hw26Dialog()?.querySelector("#tearPack");
+      if (!reglages.ouverture) return null;
+      const pack = dialoguePack()?.querySelector("#tearPack");
       return pack && visible(pack) && !pack.disabled ? pack : null;
     },
-    nomAction: "citrouille ouverte",
-    raisonLente: "citrouille restée fermée",
+    nomAction: "booster déchiré",
+    raisonLente: "booster resté fermé",
     compte: () => {},
-    delai: () => reglages.citrouillesMs
+    delai: () => reglages.ouvertureMs
   });
   // étape 2 : sauter le défilé carte par carte
   const checkPasser = createWatcher({
     trouve: () => {
-      if (!reglages.citrouilles) return null;
-      const skip = hw26Dialog()?.querySelector("#skipPackReview");
+      if (!reglages.ouverture) return null;
+      const skip = dialoguePack()?.querySelector("#skipPackReview");
       return skip && visible(skip) && !skip.disabled ? skip : null;
     },
     nomAction: "défilé des cartes sauté",
     raisonLente: "défilé resté affiché",
     compte: () => {},
-    delai: () => reglages.citrouillesMs
+    delai: () => reglages.ouvertureMs
   });
-  // étape 3a : révéler la meilleure carte (face cachée tant qu'on ne la clique pas ; le site attend ce geste avant de
-  // laisser repartir « Ouvrir encore », et le joueur le fait lui-même à chaque ouverture)
+  // étape 3a : révéler la meilleure carte si le site la laisse face cachée (gros tirages ; à Halloween il attendait ce
+  // geste avant de laisser repartir « Ouvrir encore » ; le joueur le fait lui-même)
   const CARTE_CACHEE = "#packCards .reveal-card.pack-summary-tile.big-pull-hidden:not(.revealed)";
   const carteCachee = (dialog) => {
     const tuile = dialog.querySelector(CARTE_CACHEE);
@@ -576,19 +630,19 @@
   };
   const checkRevele = createWatcher({
     trouve: () => {
-      const dialog = reglages.citrouilles ? hw26Dialog() : null;
+      const dialog = reglages.ouverture ? dialoguePack() : null;
       return dialog ? carteCachee(dialog) : null;
     },
     nomAction: "meilleure carte révélée",
     raisonLente: "carte mystère restée face cachée",
     compte: () => {},
-    delai: () => reglages.citrouillesMs
+    delai: () => reglages.ouvertureMs
   });
   // étape 3b : s'il reste des rares annoncées à lire, tourner la page du récapitulatif (jamais avant d'avoir révélé :
   // la carte mystère est en page 1, il ne faut pas la quitter face cachée)
   const checkPages = createWatcher({
     trouve: () => {
-      const dialog = reglages.citrouilles ? hw26Dialog() : null;
+      const dialog = reglages.ouverture ? dialoguePack() : null;
       if (!dialog || !tirage || carteCachee(dialog) || recapLu(dialog)) return null;
       const suivantes = dialog.querySelector("#packSummaryPager [data-summary-page]:last-of-type");
       return suivantes && visible(suivantes) && !suivantes.disabled ? suivantes : null;
@@ -596,12 +650,12 @@
     nomAction: "page suivante du récapitulatif",
     raisonLente: "des cartes rares restaient à lire",
     compte: () => {},
-    delai: () => reglages.citrouillesMs
+    delai: () => reglages.ouvertureMs
   });
-  // étape 3c : carte révélée et rares notées → « Ouvrir encore ×N », et la boucle repart à l'étape 1
+  // étape 3c : rares notées → « Ouvrir encore des boosters », retour à la boutique, et la boucle repart
   const checkEncore = createWatcher({
     trouve: () => {
-      const dialog = reglages.citrouilles ? hw26Dialog() : null;
+      const dialog = reglages.ouverture ? dialoguePack() : null;
       if (!dialog) return null;
       const encore = dialog.querySelector("#openAnotherPack");
       if (!encore || !visible(encore)) {
@@ -609,36 +663,55 @@
         return null;
       }
       if (carteCachee(dialog) || !recapLu(dialog)) return null;
-      return patiente("encore", encore, "« Ouvrir encore » est resté désactivé (plus assez de bonbons ?)");
+      return patiente("encore", encore, "« Ouvrir encore » est resté désactivé");
     },
-    nomAction: "citrouilles suivantes ouvertes",
+    nomAction: "retour à la boutique pour les boosters suivants",
     raisonLente: "récapitulatif resté affiché",
     compte: () => {},
-    delai: () => reglages.citrouillesMs
+    delai: () => reglages.ouvertureMs
   });
-  // bilan sous le bouton de la boutique, dans le même habillage que les textes du site
-  function updateCitrouillesBadge() {
-    const checkout = document.querySelector("section.hw26-checkout");
-    let badge = checkout?.querySelector("[data-yuro-citrouilles]");
-    if (!checkout || citrouilles.ouvertes + citrouilles.rares === 0) {
+  // notre encart, juste APRÈS la section #boosterPurchase (pas dedans : elle se redessine d'après son data-html)
+  function hoteBoosters() {
+    const achat = document.getElementById("boosterPurchase");
+    let hote = document.getElementById("yuro-plus-boosters");
+    if (!achat || !visible(achat)) {
+      hote?.remove();
+      return null;
+    }
+    if (!hote || hote.previousElementSibling !== achat) {
+      hote?.remove();
+      stats.remontages++;
+      totalCreations++;
+      hote = document.createElement("div");
+      hote.id = "yuro-plus-boosters";
+      hote.style.cssText = "display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;margin:10px auto 0;";
+      achat.after(hote);
+    }
+    return hote;
+  }
+  // bilan dans notre encart à côté de la boutique, dans le même habillage que les textes du site
+  function majBilanPacks() {
+    const hote = document.getElementById("yuro-plus-boosters");
+    let badge = hote?.querySelector("[data-yuro-bilan-packs]");
+    if (!hote || bilanPacks.ouvertes + bilanPacks.rares === 0) {
       badge?.remove();
       return;
     }
     if (!badge) {
       badge = document.createElement("p");
-      badge.setAttribute("data-yuro-citrouilles", "");
-      badge.className = "boutique-availability";
-      badge.title = "Compté par Yuro Plus depuis l’allumage de « Citrouilles auto » (les ouvertures manuelles comptent aussi). Journal complet : yuroPlus.cartesRares() dans la console.";
-      checkout.append(badge);
+      badge.setAttribute("data-yuro-bilan-packs", "");
+      badge.className = "bv4-note";
+      badge.title = "Compté par Yuro Plus depuis l’allumage de « Ouverture auto » (les ouvertures manuelles comptent aussi). Journal complet : bouton « ✦ Rares ».";
+      hote.append(badge);
     }
-    const texte = `Yuro Plus : ${citrouilles.ouvertes} citrouille(s) ouverte(s) · ${citrouilles.cartes} cartes · ${citrouilles.rares} rare(s) UR/LR/EX/TRS`;
+    const texte = `Yuro Plus : ${bilanPacks.ouvertes} booster(s) ouvert(s) · ${bilanPacks.cartes} cartes · ${bilanPacks.rares} rare(s) UR/LR/EX/TRS`;
     if (badge.textContent !== texte) badge.textContent = texte;
   }
-  // « mode éclair » : pendant que Citrouilles auto tourne, les animations du dialogue d'ouverture sont raccourcies à
+  // « mode éclair » : pendant que Ouverture auto tourne, les animations du dialogue d'ouverture sont raccourcies à
   // presque rien (durées à 1 ms, jamais 0 : les événements animationend/transitionend doivent continuer d'arriver au
   // site). Portée limitée au dialogue : le reste du jeu garde ses animations. Feuille retirée dès l'arrêt.
   function majEclair() {
-    const voulu = reglages.citrouilles && reglages.eclair;
+    const voulu = reglages.ouverture && reglages.eclair;
     let style = document.getElementById("yuro-plus-eclair");
     if (voulu && !style) {
       style = document.createElement("style");
@@ -674,7 +747,7 @@
     const journal = lireRares();
     if (!journal.length) {
       const vide = document.createElement("p");
-      vide.textContent = "Aucune carte rare notée pour l’instant (UR, LR, EX, TRS). Elles s’ajoutent ici à chaque ouverture de citrouille, automatique ou manuelle.";
+      vide.textContent = "Aucune carte rare notée pour l’instant (UR, LR, EX, TRS). Elles s’ajoutent ici à chaque ouverture de booster, automatique ou manuelle.";
       vide.style.cssText = "margin:6px 0;color:#9aa3b8;";
       liste.append(vide);
     }
@@ -726,7 +799,7 @@
       bouton.type = "button";
       bouton.setAttribute("data-yuro-rares", "");
       bouton.className = "btn ghost small combat-auto-btn";
-      bouton.title = "Ajouté par Yuro Plus : historique des cartes rares (UR, LR, EX, TRS) tirées des citrouilles, mémorisé d’une session à l’autre.";
+      bouton.title = "Ajouté par Yuro Plus : historique des cartes rares (UR, LR, EX, TRS) tirées des boosters, mémorisé d’une session à l’autre.";
       bouton.addEventListener("click", () => {
         if (document.getElementById("yuro-plus-rares")) fermePanneauRares();
         else montrePanneauRares();
@@ -736,14 +809,14 @@
     const texte = `✦ Rares (${raresTotal})`;
     if (bouton.textContent !== texte) bouton.textContent = texte;
   }
-  const allumeCitrouilles = (on) => {
-    reglages.citrouilles = Boolean(on); // jamais mémorisé : ça dépense des bonbons, rallumage volontaire à chaque fois
+  const allumeOuverture = (on) => {
+    reglages.ouverture = Boolean(on); // jamais mémorisé : rallumage volontaire à chaque séance
     majEclair();
-    if (reglages.citrouilles) {
-      citrouilles.ouvertes = 0;
-      citrouilles.cartes = 0;
-      citrouilles.rares = 0;
-      toast("Yuro Plus : Citrouilles auto — ouverture en boucle de la quantité choisie (des bonbons sont dépensés à chaque ouverture). Reclique le bouton pour arrêter.");
+    if (reglages.ouverture) {
+      bilanPacks.ouvertes = 0;
+      bilanPacks.cartes = 0;
+      bilanPacks.rares = 0;
+      toast("Yuro Plus : Ouverture auto — j’ouvre tes boosters gratuits puis ceux de quêtes, par lots de 10, sans jamais payer en ki. Reclique le bouton pour arrêter.");
     }
   };
 
@@ -923,20 +996,20 @@
       }
     });
     updateHwBadge(hwHeader);
-    // « Citrouilles auto » : dans la boutique Halloween, et dans la barre du dialogue d'ouverture pour pouvoir
+    // « Ouverture auto » : à côté du bouton Ouvrir de la boutique, et dans la barre du dialogue d'ouverture pour pouvoir
     // arrêter en pleine séance
-    for (const host of [document.querySelector("section.hw26-checkout"), hw26Dialog()?.querySelector(".pack-actions")]) {
+    for (const host of [hoteBoosters(), dialoguePack()?.querySelector(".pack-actions")]) {
       mountToggle({
         id: "pk",
         header: host,
-        label: "🎃 Citrouilles auto",
-        title: "Ajouté par Yuro Plus : ouvre les citrouilles en boucle avec la quantité choisie — attention, chaque ouverture dépense des bonbons. Les cartes UR, LR, EX et TRS sont notées (yuroPlus.cartesRares() dans la console). Toujours éteint au chargement de la page.",
-        lire: () => reglages.citrouilles,
-        ecrire: allumeCitrouilles
+        label: "🎁 Ouverture auto",
+        title: "Ajouté par Yuro Plus : ouvre en boucle tes boosters gratuits puis ceux de quêtes (pack Multivers), par lots de 10, et s’arrête quand il n’y en a plus — jamais de paiement en ki. Les cartes UR, LR, EX et TRS sont notées (bouton « ✦ Rares »). Toujours éteint au chargement de la page.",
+        lire: () => reglages.ouverture,
+        ecrire: allumeOuverture
       });
       mountRaresButton(host?.querySelector(".combat-auto-group"));
     }
-    updateCitrouillesBadge();
+    majBilanPacks();
     majDoublons();
   }
   // ---- fonctionnement en arrière-plan ----
@@ -1321,23 +1394,29 @@
     checkFarm();
     checkTower();
     checkHalloween();
+    checkSource();
+    checkLot();
     checkOuvrir();
-    checkCitrouille();
+    finDesGratuits();
+    checkDechire();
     checkPasser();
     checkRevele();
     checkPages();
     checkEncore();
   });
-  // la chaîne citrouilles a son propre battement rapide, actif seulement pendant une séance : réaction en ~100 ms à
+  // la chaîne d'ouverture a son propre battement rapide, actif seulement pendant une séance : réaction en ~100 ms à
   // chaque écran (le battement normal ci-dessus reste en secours et gère le journal des ouvertures manuelles)
-  const tickCitrouilles = createTicker(100);
+  const tickOuverture = createTicker(100);
   // le chargement de la liste du marché profite du même battement rapide
-  tickCitrouilles.add(chargeDoublons);
-  tickCitrouilles.add(() => {
-    if (!reglages.citrouilles) return;
+  tickOuverture.add(chargeDoublons);
+  tickOuverture.add(() => {
+    if (!reglages.ouverture) return;
     litRecapitulatif();
+    checkSource();
+    checkLot();
     checkOuvrir();
-    checkCitrouille();
+    finDesGratuits();
+    checkDechire();
     checkPasser();
     checkRevele();
     checkPages();
@@ -1368,14 +1447,14 @@
     suivantes: 0,
     relancesHalloween: 0,
     serieHalloween: hwSerie,
-    citrouilles,
+    packs: bilanPacks,
     reglages,
-    // yuroPlus.citrouillesAuto(true) : ouvrir les citrouilles en boucle (même effet que le bouton de la boutique).
-    // Jamais mémorisé : chaque ouverture dépense des bonbons, le rallumage doit rester un geste volontaire.
-    citrouillesAuto(on = true) {
-      allumeCitrouilles(on);
-      repaintToggle("pk", reglages.citrouilles);
-      return reglages.citrouilles ? "Citrouilles auto activé : ouverture en boucle, bonbons dépensés à chaque ouverture" : "Citrouilles auto coupé";
+    // yuroPlus.ouvertureAuto(true) : ouvrir les boosters gratuits et de quête en boucle (même effet que le bouton de
+    // la boutique). Jamais mémorisé.
+    ouvertureAuto(on = true) {
+      allumeOuverture(on);
+      repaintToggle("pk", reglages.ouverture);
+      return reglages.ouverture ? "Ouverture auto activée : boosters gratuits puis de quête, jamais de ki" : "Ouverture auto coupée";
     },
     // yuroPlus.cartesRares() : journal mémorisé des cartes UR/LR/EX/TRS tirées ; yuroPlus.cartesRares("vider") l'efface
     // (même journal que le panneau « ✦ Rares » de la boutique)
@@ -1389,7 +1468,7 @@
       const journal = lireRares();
       return journal.length ? journal : "aucune carte rare notée pour l’instant (UR, LR, EX, TRS)";
     },
-    // yuroPlus.citrouillesEclair(false) : rendre leurs animations au dialogue d'ouverture pendant Citrouilles auto
+    // yuroPlus.ouvertureEclair(false) : rendre leurs animations au dialogue d'ouverture pendant Ouverture auto
     // (mémorisé ; par défaut elles sont raccourcies pour aller plus vite)
     // yuroPlus.doublons(true) : au marché (Vendre), ne montrer que les cartes à 2 exemplaires ou plus (même effet que
     // la puce « Doublons », mémorisé)
@@ -1399,11 +1478,11 @@
       majDoublons();
       return reglages.doublons ? "marché : seuls les doublons (×2 ou plus) sont affichés" : "marché : toutes les cartes sont affichées";
     },
-    citrouillesEclair(on = true) {
+    ouvertureEclair(on = true) {
       reglages.eclair = Boolean(on);
-      writeSetting("citrouillesEclair", reglages.eclair);
+      writeSetting("ouvertureEclair", reglages.eclair);
       majEclair();
-      return reglages.eclair ? "mode éclair activé : animations du dialogue raccourcies pendant Citrouilles auto" : "mode éclair coupé : le dialogue garde ses animations normales";
+      return reglages.eclair ? "mode éclair activé : animations du dialogue raccourcies pendant Ouverture auto" : "mode éclair coupé : le dialogue garde ses animations normales";
     },
     // yuroPlus.relanceAuto(false) coupe toute relance (mémorisé), yuroPlus.relanceAuto(true) la remet
     relanceAuto(on = true) {
