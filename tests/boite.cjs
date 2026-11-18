@@ -1,12 +1,21 @@
 // Boîte noire et garde-fous de l'arrière-plan : une page figée (calcul sans fin pendant un rejeu onglet caché) est
 // repérée par le worker, qui note le rappel en cours et ses derniers états en IndexedDB, puis l'heure de reprise ;
-// le rapport donne aussi la suite des derniers rappels et le code du rappel qui a bloqué plus d'une seconde ;
+// le rapport donne aussi la suite des derniers rappels et le code du rappel qui a bloqué plus d'une seconde ; blocage
+// au RETOUR au premier plan, hors de notre rejeu (cas réel du 18/11) : repère du retour daté, fonction nommée par la
+// mesure du navigateur (long animation frame) ;
 // yuroDiag.boiteNoire() télécharge le rapport ; message au chargement suivant (une seule fois) ; aucune fausse alerte
 // sur une page normale ; frein anti ping-pong quand le site retire nos boutons aussitôt ajoutés.
 const { chromium } = require('playwright');
 const fs = require('fs');
 const script = fs.readFileSync(process.argv[2], 'utf8');
-const HTML = `<!doctype html><html><body><main><p>Jeu</p>
+// le « code du site » vit dans un vrai fichier, comme sur yurocollection.fr : le navigateur peut alors en donner
+// l'adresse et la position, et le script y relire le passage en cause
+const JEU_JS = `window.figeAuRetour = function figeAuRetour() {
+  // boucle de rattrapage du site (simulée)
+  const fin = Date.now() + 10000;
+  while (Date.now() < fin) {}
+};`;
+const HTML = `<!doctype html><html><head><script src="/jeu.js"></script></head><body><main><p>Jeu</p>
 <header><div><span class="eyebrow">HALLOWEEN · LE COMTE DE MINUIT</span></div></header></main></body></html>`;
 const toasts = (page) => page.evaluate(() => [...document.querySelectorAll('body > div > div')].map((d) => d.textContent));
 (async () => {
@@ -16,15 +25,18 @@ const toasts = (page) => page.evaluate(() => [...document.querySelectorAll('body
   const nouvellePage = async () => {
     const page = await browser.newPage();
     page.on('pageerror', (e) => errors.push(e.message));
-    await page.route('https://yurocollection.fr/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: HTML }));
+    await page.route('https://yurocollection.fr/**', (route) => new URL(route.request().url()).pathname === '/jeu.js'
+      ? route.fulfill({ status: 200, contentType: 'text/javascript', body: JEU_JS })
+      : route.fulfill({ status: 200, contentType: 'text/html', body: HTML }));
     return page;
   };
   const demarre = async (page, cache) => {
     await page.goto(`https://yurocollection.fr/?t=${Date.now()}#combat`);
     if (cache) {
       await page.evaluate(() => {
-        Object.defineProperty(Document.prototype, 'hidden', { configurable: true, get: () => true });
-        Object.defineProperty(Document.prototype, 'visibilityState', { configurable: true, get: () => 'hidden' });
+        window.__cache = true;
+        Object.defineProperty(Document.prototype, 'hidden', { configurable: true, get: () => window.__cache });
+        Object.defineProperty(Document.prototype, 'visibilityState', { configurable: true, get: () => window.__cache ? 'hidden' : 'visible' });
       });
     }
     await page.addScriptTag({ content: script });
@@ -57,6 +69,30 @@ const toasts = (page) => page.evaluate(() => [...document.querySelectorAll('body
     long: rapport.rappelsLongs?.[0] && { nom: rapport.rappelsLongs[0].nom, type: rapport.rappelsLongs[0].type, dureeMs: rapport.rappelsLongs[0].dureeMs, code: /while \(Date\.now\(\) < fin\)/.test(rapport.rappelsLongs[0].code) },
     dernierEtat: rapport.journal.at(-1) && { ongletCache: rapport.journal.at(-1).ongletCache, arrierePlan: rapport.journal.at(-1).arrierePlan, page: rapport.journal.at(-1).page }
   };
+  // 2 bis. le cas réel du 18/11 : tout va bien onglet caché, mais au RETOUR au premier plan une fonction du site, hors
+  // de notre rejeu, bloque la page 10 s. Le rapport doit dater le retour, et la mesure du navigateur doit nommer la
+  // fonction (avec la taille de la page et le nombre d'animations dans les états)
+  const retour = await nouvellePage();
+  await demarre(retour, true);
+  await retour.waitForTimeout(2500);
+  const loaf = await retour.evaluate(() => (PerformanceObserver.supportedEntryTypes ?? []).includes('long-animation-frame'));
+  await retour.evaluate(() => {
+    window.__cache = false; // la fenêtre revient
+    setTimeout(() => requestAnimationFrame(window.figeAuRetour), 600);
+  });
+  await retour.waitForTimeout(14000);
+  const [fichierRetour] = await Promise.all([retour.waitForEvent('download'), retour.evaluate(() => yuroDiag.boiteNoire())]);
+  const rapportRetour = JSON.parse(fs.readFileSync(await fichierRetour.path(), 'utf8'));
+  const mesure = (rapportRetour.rappelsLongs ?? []).find((r) => /navigateur/.test(r.type));
+  out.retour = {
+    loaf,
+    repere: (rapportRetour.derniersRappels ?? []).some((r) => r.nom === '— retour au premier plan —' && r.type === 'onglet'),
+    reprise: Boolean(rapportRetour.repriseLe),
+    mesure: mesure && { type: mesure.type, dureeMs: mesure.dureeMs, fonctions: mesure.scripts.map((x) => x.fonction), fichiers: mesure.scripts.map((x) => x.fichier), code: mesure.scripts.some((x) => /boucle de rattrapage du site/.test(x.code ?? '')) },
+    etat: rapportRetour.journal.at(-1) && { ongletCache: rapportRetour.journal.at(-1).ongletCache, elements: rapportRetour.journal.at(-1).elements, animationsCss: rapportRetour.journal.at(-1).animationsCss }
+  };
+  await retour.close();
+
   // 3. au chargement suivant, un message propose le rapport ; une seule fois
   await demarre(page, false);
   await page.waitForTimeout(800);
@@ -89,6 +125,9 @@ const toasts = (page) => page.evaluate(() => [...document.querySelectorAll('body
     && out.rapport.sequence?.nom === 'figeLaPage' && out.rapport.sequence?.type === 'minuterie 100 ms'
     && out.rapport.long?.nom === 'figeLaPage' && out.rapport.long.type === 'minuterie 100 ms' && out.rapport.long.dureeMs >= 10000 && out.rapport.long.code
     && out.rapport.etats >= 1 && out.rapport.dernierEtat.ongletCache === true && out.rapport.dernierEtat.arrierePlan === true && out.rapport.dernierEtat.page === '#combat'
+    && out.retour.repere && out.retour.reprise && out.retour.mesure?.dureeMs >= 9000
+    && (out.retour.loaf ? out.retour.mesure.fichiers.some((f) => f.endsWith('/jeu.js')) && out.retour.mesure.code : true)
+    && out.retour.etat.ongletCache === false && out.retour.etat.elements > 0 && typeof out.retour.etat.animationsCss === 'number'
     && out.annonce && out.annonceUneFois
     && out.pingPong.reactive && out.pingPong.retraits > 0 && out.pingPong.retraits < 200
     && errors.length === 0;

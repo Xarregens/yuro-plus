@@ -82,8 +82,17 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   Le blocage tombe à l'heure du combat suivant. Pistes non tranchées : combat du site qui ne finit pas (« ils se
   regardent ») résolu d'un bloc, ou boucle de rattrapage. 0.10.2 : le rapport joint la suite des 20 derniers rappels
   rejoués (nom, type « animation » / « minuterie N ms » / « intervalle N ms ») et le CODE de tout rappel ayant bloqué
-  plus d'une seconde (`rappelsLongs`, code du site, 4000 caractères) : attendre la prochaine boîte noire pour lire
-  `run` avant de corriger.
+  plus d'une seconde (`rappelsLongs`, code du site, 4000 caractères).
+  Précision du propriétaire : le blocage est apparu QUAND IL EST REVENU sur la fenêtre réduite (F5 sans effet tant que
+  ça dure, puis la page revient seule). `run` n'était donc peut-être que le dernier rappel rejoué avant le retour ;
+  piste privilégiée : rattrapage au retour au premier plan (travail d'affichage ou du site accumulé onglet caché).
+  0.10.3 : repère « — retour au premier plan — » / « — passage en arrière-plan — » dans `derniersRappels` avec un état
+  immédiat ; états enrichis de `elements` (nœuds de la page) et `animationsCss` (document.getAnimations) pour voir une
+  accumulation ; mesure du navigateur (PerformanceObserver « long-animation-frame », sinon « longtask ») de toute
+  image/tâche > 1 s, même hors de notre rejeu : scripts en cause (déclencheur, fonction, fichier, position, part de
+  mise en page) et passage de code relu dans le fichier du site (lecture seule, cache) ; l'incident tout juste repris
+  reste ouvert 30 s dans le worker pour recevoir ces mesures qui arrivent après coup. Attendre ce rapport avant de
+  corriger.
 - Marché `#market`, onglet « Vendre » (yuroDiag du 17/11/2026) : `#marketWorkspace`, grille `.mkx-own-grid` de
   `button.mkx-own[data-market-sell=id]` (nom `.mkx-own-copy strong`, pastille `.mkx-own-art em` « ×N » = exemplaires
   possédés, confirmé ; le site réserve le dernier exemplaire, donc doublon = ×2+), puces de rareté `.mkx-chips

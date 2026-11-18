@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.10.2
+// @version      0.10.3
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm, « Suivant auto » dans le Château de l'infini, « Citrouilles auto » et journal des cartes rares en Halloween, filtre « Doublons » au marché ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.10.2";
+  const YURO_VERSION = "0.10.3";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -954,7 +954,7 @@
   const BOITE = { base: "yuro-plus", magasin: "boite-noire", cle: "dernier", seuilMs: 8e3 };
   const boiteNoire = (() => {
     const code = `
-      let dernier = Date.now(), tour = Date.now(), journal = [], enCours = null, incident = null, sequence = [], longs = [];
+      let dernier = Date.now(), tour = Date.now(), journal = [], enCours = null, incident = null, sequence = [], longs = [], recent = null, recentJusqua = 0;
       const ecrire = (fiche) => {
         const ouverture = indexedDB.open(${JSON.stringify(BOITE.base)}, 1);
         ouverture.onupgradeneeded = () => ouverture.result.createObjectStore(${JSON.stringify(BOITE.magasin)});
@@ -974,14 +974,16 @@
         if (e.data.genre === "long") {
           longs.push(e.data.rappel);
           if (longs.length > 5) longs.shift();
-          if (incident) { incident.rappelsLongs = longs.slice(); ecrire({ ...incident }); }
+          // les mesures du navigateur n'arrivent qu'une fois le blocage fini, parfois après la reprise
+          const cible = incident ?? (Date.now() < recentJusqua ? recent : null);
+          if (cible) { cible.rappelsLongs = longs.slice(); ecrire({ ...cible }); }
           return;
         }
         dernier = Date.now();
         enCours = null;
         journal.push(e.data.etat);
         if (journal.length > 60) journal.shift();
-        if (incident) { incident.repriseLe = new Date(dernier).toISOString(); ecrire({ ...incident }); incident = null; }
+        if (incident) { incident.repriseLe = new Date(dernier).toISOString(); ecrire({ ...incident }); recent = incident; recentJusqua = dernier + 3e4; incident = null; }
       };
       setInterval(() => {
         const maintenant = Date.now();
@@ -1030,9 +1032,9 @@
     };
     return {
       // appelé à chaque battement : un état par seconde suffit, petit et sans donnée personnelle
-      battement(cache) {
+      battement(cache, force = false) {
         const maintenant = Date.now();
-        if (!worker || maintenant - dernierEnvoi < 1e3) return;
+        if (!worker || (!force && maintenant - dernierEnvoi < 1e3)) return;
         dernierEnvoi = maintenant;
         const derniere = apiLog.at(-1);
         envoie({ genre: "etat", etat: {
@@ -1042,7 +1044,10 @@
           arrierePlan: fond.actif,
           ...stats,
           derniereRequete: derniere ? `${derniere.t} ${derniere.methode} ${derniere.chemin.split("?")[0]} ${derniere.statut}` : null,
-          memoireMo: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null
+          memoireMo: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null,
+          // ce qui pourrait s'accumuler onglet caché et se rattraper d'un bloc au retour
+          elements: document.getElementsByTagName("*").length,
+          animationsCss: document.getAnimations ? document.getAnimations().length : null
         } });
         stats.mutations = 0;
         stats.remontages = 0;
@@ -1074,6 +1079,52 @@
     return "lecture de la boîte noire…";
   };
   boiteNoire.annonce();
+  // Le navigateur sait mesurer toute image ou tâche anormalement longue, y compris hors de nos rejeux (retour au
+  // premier plan, événements du site, calcul de la mise en page) et nommer les scripts en cause : « long animation
+  // frame » (Chrome 123+), sinon « longtask » sans le détail. Rapport joint à la boîte noire au-delà d'une seconde.
+  try {
+    const types = PerformanceObserver.supportedEntryTypes ?? [];
+    const type = types.includes("long-animation-frame") ? "long-animation-frame" : types.includes("longtask") ? "longtask" : null;
+    if (type) {
+      // le passage du code du site désigné par le navigateur (fichier + position) : relu depuis le fichier du site,
+      // en lecture seule et normalement depuis le cache du navigateur, pour savoir ce qui a tourné si longtemps
+      const fichiers = new Map();
+      const extrait = async (script) => {
+        try {
+          const url = new URL(script.sourceURL, location.href);
+          if (url.origin !== location.origin || !(script.sourceCharPosition >= 0)) return;
+          if (!fichiers.has(url.href)) fichiers.set(url.href, originalFetch(url.href, { cache: "force-cache" }).then((reponse) => reponse.text()));
+          const texte = await fichiers.get(url.href);
+          const debut = script.sourceCharPosition;
+          return texte.slice(Math.max(0, debut - 300), debut + 2500);
+        } catch {}
+      };
+      new PerformanceObserver((liste) => {
+        for (const mesure of liste.getEntries()) {
+          if (mesure.duration < 1e3) continue;
+          const fin = mesure.startTime + mesure.duration;
+          const scripts = [...(mesure.scripts ?? [])].slice(0, 12);
+          Promise.all(scripts.map(extrait)).then((extraits) => boiteNoire.long({
+            t: stamp(),
+            type: type === "longtask" ? "tâche longue (navigateur)" : "image longue (navigateur)",
+            dureeMs: Math.round(mesure.duration),
+            ilYAMs: Math.round(performance.now() - fin),
+            miseEnPageMs: mesure.styleAndLayoutStart ? Math.round(fin - mesure.styleAndLayoutStart) : null,
+            scripts: scripts.map((script, index) => ({
+              declencheur: String(script.invoker ?? "").slice(0, 160),
+              genre: script.invokerType,
+              fonction: script.sourceFunctionName,
+              fichier: String(script.sourceURL ?? "").split("?")[0].slice(-120),
+              position: script.sourceCharPosition,
+              dureeMs: Math.round(script.duration),
+              miseEnPageForceeMs: Math.round(script.forcedStyleAndLayoutDuration ?? 0),
+              code: extraits[index] ?? null
+            }))
+          }));
+        }
+      }).observe({ type, buffered: true });
+    }
+  } catch {}
   const nomRappel = (callback) => (callback.name || String(callback)).replace(/\s+/g, " ").slice(0, 160);
   function createTicker(ms) {
     const listeners = new Set();
@@ -1181,9 +1232,16 @@
         boiteNoire.long({ t: stamp(), nom: callback.name || "(anonyme)", type, dureeMs: Math.round(duree), ongletCache: cache, code: String(callback).slice(0, 4e3) });
       }
     };
+    let dernierCache = isHidden();
     tick.add(() => {
       const debut = performance.now();
       const cache = isHidden();
+      if (cache !== dernierCache) {
+        // l'instant précis du retour (ou du départ) : un état tout de suite, et un repère dans la suite des rappels
+        boiteNoire.debut(cache ? "— passage en arrière-plan —" : "— retour au premier plan —", "onglet");
+        boiteNoire.battement(cache, true);
+        dernierCache = cache;
+      }
       const horsBudget = () => performance.now() - debut > reglages.budgetMs;
       if (rafQueue.size) {
         const entries = [...rafQueue];
