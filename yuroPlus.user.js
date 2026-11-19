@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.11.7
+// @version      0.11.8
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm et en raid, « Suivant auto » dans le Château de l'infini, « Ouverture auto » des boosters gratuits et de quête avec journal des cartes rares, filtre « Doublons » au marché ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.11.7";
+  const YURO_VERSION = "0.11.8";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -440,7 +440,7 @@
   // automatique ou manuelle.
   const RARE = /^(UR|LR|EX|TRS)$/i;
   const RARES_KEY = "yuro-plus:cartes-rares";
-  const bilanPacks = { ouvertes: 0, cartes: 0, rares: 0 };
+  const bilanPacks = { ouvertes: 0, cartes: 0, rares: 0, parRarete: {} };
   const lireRares = () => {
     try {
       return JSON.parse(localStorage.getItem(RARES_KEY)) ?? [];
@@ -474,8 +474,22 @@
     return enCours ? dialog : null;
   }
   let tirage = null; // lecture du récapitulatif en cours (une par ouverture)
+  // Cartes d'avant (enregistrement du 18/11, signalé par le propriétaire) : le dialogue garde le récapitulatif de
+  // l'ouverture précédente, et après « Tout passer » le site affiche le récapitulatif et « Ouvrir encore » 40 à 90 ms
+  // AVANT d'y mettre les nouvelles cartes. Lu dans ce créneau, le récapitulatif était celui d'avant : rares notées en
+  // double, puis « Ouvrir encore » cliqué sans avoir vu les nouvelles. Désormais, tant qu'une ouverture est en cours
+  // (dialogue en déchirage / défilé / fermeture), les tuiles présentes sont marquées « anciennes » et ignorées ; un
+  // récapitulatif n'est lu qu'une fois de NOUVELLES tuiles affichées (filet : au bout de 3 s, on lit ce qu'il y a).
+  const TUILES = "#packCards .reveal-card.pack-summary-tile";
+  const TUILES_NEUVES = `${TUILES}:not([data-yuro-ancienne])`;
+  const recap = { ancienHint: null, vuDepuis: 0, neuvesDepuis: 0 };
+  function marqueAnciennes(dialog) {
+    for (const tuile of dialog.querySelectorAll(TUILES_NEUVES)) tuile.setAttribute("data-yuro-ancienne", "");
+    recap.ancienHint = dialog.querySelector("#revealHint")?.textContent ?? "";
+  }
+  const ORDRE_RARETES = ["TRS", "EX", "LR", "UR", "SSR", "SR", "R", "C"];
   function litTuiles(dialog) {
-    for (const tuile of dialog.querySelectorAll("#packCards .reveal-card.pack-summary-tile")) {
+    for (const tuile of dialog.querySelectorAll(TUILES_NEUVES)) {
       const code = tuile.querySelector(".summary-card-top span")?.textContent?.trim() ?? "";
       const numero = tuile.querySelector(".summary-card-art span")?.textContent?.trim() ?? "";
       if (!RARE.test(code) || tirage.vues.has(code + numero)) continue;
@@ -492,11 +506,30 @@
   }
   function litRecapitulatif() {
     const dialog = dialoguePack();
-    if (!dialog || !visible(dialog.querySelector("#openAnotherPack"))) {
+    if (!dialog) {
       tirage = null;
+      recap.vuDepuis = 0;
+      recap.neuvesDepuis = 0;
+      return;
+    }
+    if (!visible(dialog.querySelector("#openAnotherPack")) || dialog.classList.contains("closing")) {
+      // ouverture en cours ou dialogue qui se referme : ce que contient le récapitulatif date d'avant
+      marqueAnciennes(dialog);
+      tirage = null;
+      recap.vuDepuis = 0;
+      recap.neuvesDepuis = 0;
       return;
     }
     if (!tirage) {
+      const maintenant = Date.now();
+      recap.vuDepuis ||= maintenant;
+      const filet = maintenant - recap.vuDepuis > 3e3;
+      const neuves = dialog.querySelectorAll(TUILES_NEUVES).length;
+      if (!neuves && !filet) return; // les nouvelles cartes ne sont pas encore là
+      if (neuves) recap.neuvesDepuis ||= maintenant;
+      // même texte qu'avant (« 10 boosters · 50 cartes » + pastilles) : laisser 0,4 s au site pour le mettre à jour
+      if (!filet && (dialog.querySelector("#revealHint")?.textContent ?? "") === recap.ancienHint && maintenant - recap.neuvesDepuis < 400) return;
+      if (filet) for (const tuile of dialog.querySelectorAll("[data-yuro-ancienne]")) tuile.removeAttribute("data-yuro-ancienne");
       // nouveau récapitulatif : compter l'ouverture, et lire sur les pastilles combien de rares sont annoncées.
       // Tant que le compte de boosters (« 8 boosters · 40 cartes ») ou les tuiles ne sont pas affichés, l'écran est encore en train de se
       // construire : attendre le battement suivant (indispensable à grande vitesse, sinon « Ouvrir encore »
@@ -509,7 +542,10 @@
       let attendues = 0;
       for (const chip of dialog.querySelectorAll(".qol-pack-recap i")) {
         const code = chip.querySelector("b")?.textContent?.trim() ?? "";
-        if (RARE.test(code)) attendues += parseInt(chip.textContent.slice(code.length).replace(/[^0-9]/g, ""), 10) || 0;
+        const nombre = parseInt(chip.textContent.slice(code.length).replace(/[^0-9]/g, ""), 10) || 0;
+        if (RARE.test(code)) attendues += nombre;
+        // détail par rareté pour le bilan (les pastilles « NEW » comptent les nouvelles cartes, pas une rareté)
+        if (code && !/^new$/i.test(code)) bilanPacks.parRarete[code.toUpperCase()] = (bilanPacks.parRarete[code.toUpperCase()] ?? 0) + nombre;
       }
       tirage = { attendues, vues: new Set() };
     }
@@ -749,7 +785,10 @@
       badge.title = "Compté par Yuro Plus depuis l’allumage de « Ouverture auto » (les ouvertures manuelles comptent aussi). Journal complet : bouton « ✦ Rares ».";
       hote.append(badge);
     }
-    const texte = `Yuro Plus : ${bilanPacks.ouvertes} booster(s) ouvert(s) · ${bilanPacks.cartes} cartes · ${bilanPacks.rares} rare(s) UR/LR/EX/TRS`;
+    const detail = Object.entries(bilanPacks.parRarete)
+      .sort(([a], [b]) => (ORDRE_RARETES.indexOf(a) + 1 || 99) - (ORDRE_RARETES.indexOf(b) + 1 || 99))
+      .map(([code, nombre]) => `${code} ${nombre}`).join(" · ");
+    const texte = `Yuro Plus : ${bilanPacks.ouvertes} booster(s) ouvert(s) · ${bilanPacks.cartes} cartes${detail ? ` (${detail})` : ""} · ${bilanPacks.rares} rare(s) UR/LR/EX/TRS notée(s)`;
     if (badge.textContent !== texte) badge.textContent = texte;
   }
   // « mode éclair » : pendant que Ouverture auto tourne, les animations du dialogue d'ouverture sont raccourcies à
@@ -859,6 +898,7 @@
     majEclair();
     if (reglages.ouverture) {
       bilanPacks.ouvertes = 0;
+      bilanPacks.parRarete = {};
       bilanPacks.cartes = 0;
       bilanPacks.rares = 0;
       toast("Yuro Plus : Ouverture auto — j’ouvre tes boosters gratuits puis ceux de quêtes, par lots de 10, sans jamais payer en ki. Reclique le bouton pour arrêter.");

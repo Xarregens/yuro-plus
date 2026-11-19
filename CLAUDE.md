@@ -73,6 +73,16 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   (`createWatcher` accepte `reessai` / `essais` par surveillant) ; ticker 100 ms (`ouvertureMs`) et « mode éclair » (`eclair`, mémorisé sous
   `ouvertureEclair`) qui raccourcit à 1 ms animations/transitions de `#packDialog` pendant la séance (jamais 0 ms).
   Panneau « ✦ Rares (N) » `#yuro-plus-rares`, ouvert seul en fin de séance s'il y a eu des rares.
+  Récapitulatif PÉRIMÉ (signalé le 19/11, vu dans l'enregistrement du 18/11) : le dialogue garde le récapitulatif de
+  l'ouverture précédente ; après « Tout passer », le dialogue passe en classe `summary-active` (étapes : `staged` =
+  déchirage, `review-active` = défilé, `summary-active` = récapitulatif, `closing` = fermeture) et « Ouvrir encore »
+  devient visible 40–90 ms AVANT que `#packCards` reçoive les nouvelles tuiles. Lu dans ce créneau, on relisait
+  l'ancien (rares en double) et on relançait sans voir le nouveau (rares manquées). 0.11.8 : pendant une ouverture
+  (Ouvrir encore invisible ou dialogue `closing`), `marqueAnciennes` pose `data-yuro-ancienne` sur les tuiles présentes
+  et retient le texte de `#revealHint` ; le récapitulatif n'est lu qu'avec des tuiles SANS cette marque (et, si le
+  texte du compte est identique à l'ancien, 0,4 s de plus) ; filet après 3 s. Bilan détaillé par rareté
+  (`bilanPacks.parRarete`, d'après les pastilles, NEW exclu). `tests/boosters.cjs` simule ce retard de 150 ms : la
+  0.11.7 y note UR Hidan deux fois et manque la TRS.
 - Arrière-plan : les vérifications battent dans un Web Worker (créé depuis un blob ; si le site ajoutait une CSP
   worker-src, retomber sur setInterval). `installFond` masque document.hidden/visibilityState, retient
   visibilitychange, et rejoue rAF + setTimeout/setInterval posés pendant que l'onglet est caché (ids ≥ 2e9 pour ne

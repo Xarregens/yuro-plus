@@ -4,7 +4,8 @@
 // boosters » — et s'arrête quand le bouton ne propose plus que du ki. JAMAIS de clic sur « Ouvrir » payé en ki, sur
 // une jaquette (« Ouvrir ici ») ni sur « Rouvrir ». Notre bouton vit à côté de la section qui se redessine. Mode éclair
 // pendant la séance seulement ; journal UR/LR/EX/TRS mémorisé (aussi en ouverture manuelle), panneau « ✦ Rares »
-// ouvert en fin de séance et vidable. Le booster simulé ignore les clics pendant son animation d'arrivée (0,7 s) :
+// ouvert en fin de séance et vidable. Le récapitulatif simulé montre d'abord les cartes de l'ouverture précédente
+// (comme le vrai site) : aucune rare ne doit être notée deux fois ni manquée ; bilan détaillé par rareté. Le booster simulé ignore les clics pendant son animation d'arrivée (0,7 s) :
 // il doit quand même être déchiré en moins de 1,5 s (la 0.11.2 attendait 5 s après un clic trop précoce).
 const { chromium } = require('playwright');
 const fs = require('fs');
@@ -59,12 +60,16 @@ function etape(nom) {
  if (nom === 'ferme') $('#packDialog').removeAttribute('open'); else $('#packDialog').setAttribute('open', '');
 }
 let enCours = 0;
+// comme le vrai site (enregistrement du 18/11) : le récapitulatif et « Ouvrir encore » s'affichent d'abord avec les
+// cartes de l'ouverture PRÉCÉDENTE, les nouvelles n'arrivent qu'un peu après (ici 150 ms)
 window.__recap = (indice, nb) => {
- tirageNo = indice; pageNo = 0;
- const t = window.__tirages[indice];
- $('#revealHint').innerHTML = nb + ' booster' + (nb > 1 ? 's' : '') + ' · ' + nb * 5 + ' cartes<span class="qol-pack-recap">' + t.chips + '</span>';
- window.__page(0);
  etape('recap');
+ setTimeout(() => {
+  tirageNo = indice; pageNo = 0;
+  const t = window.__tirages[indice];
+  $('#revealHint').innerHTML = nb + ' booster' + (nb > 1 ? 's' : '') + ' · ' + nb * 5 + ' cartes<span class="qol-pack-recap">' + t.chips + '</span>';
+  window.__page(0);
+ }, 150);
 };
 window.__page = (p) => { pageNo = p; $('#packCards').innerHTML = window.__tirages[tirageNo].pages[p]; $('#packSummaryPager [data-summary-page="1"]').disabled = p >= window.__tirages[tirageNo].pages.length - 1; };
 document.addEventListener('click', (e) => {
@@ -176,7 +181,7 @@ boutique();
     && out.seance.bilan.ouvertes === 10 && out.seance.bilan.cartes === 50 && out.seance.bilan.rares === 3
     && JSON.stringify(out.seance.journal) === JSON.stringify(['UR Hidan #889', 'UR Madara #100', 'TRS Goku #007'])
     && out.seance.toastFin && out.seance.panneau && out.seance.eclair.pendant && !out.seance.eclair.apres
-    && /10 booster/.test(out.seance.bilanAffiche) && /3 rare/.test(out.seance.bilanAffiche) && out.seance.boutonRares === '✦ Rares (3)'
+    && /10 booster/.test(out.seance.bilanAffiche) && /\(TRS 1 · UR 2 · C 47\)/.test(out.seance.bilanAffiche) && /3 rare/.test(out.seance.bilanAffiche) && out.seance.boutonRares === '✦ Rares (3)'
     && JSON.stringify(out.sansBascule.achats) === JSON.stringify([{ payment: 'free', quantity: 2 }, { payment: 'reward', quantity: 8 }])
     && out.sansBascule.ki === 0 && out.sansBascule.puces === 1 && out.sansBascule.jaquette === 0 && out.sansBascule.rouvrir === 0
     && /plus de boosters gratuits ni de quête.*\[bouton : reward, grisé · puces : ki\]/.test(out.sansBascule.diag)
