@@ -5,7 +5,8 @@
 // onglets Acheter / Échanges, où rien n'est cliqué ; éteinte à chaque arrivée sur Vendre et pas mémorisée.
 // Puce « 値 Prix en ligne » : trie toute la liste par prix le moins cher en ligne chez les autres joueurs (ventes
 // actives seulement : ni mes annonces, ni échanges, ni annonces vendues), puis par cote ; prix écrit sous chaque carte ;
-// combinable avec Doublons ; données lues dans marketUI.data du site, ou, sans elle, dans la réponse /api/market
+// combinable avec Doublons ; aucun clignotement quand le site redessine la grille (clic, mise en vente) : retrié
+// avant affichage, grille masquée pendant le rechargement de la liste ; données lues dans marketUI.data du site, ou, sans elle, dans la réponse /api/market
 // reçue au passage. Ne touche à rien d'autre (ni sélection de carte, ni puces du site, ni vente).
 const { chromium } = require('playwright');
 const fs = require('fs');
@@ -60,6 +61,20 @@ function rendu() {
   document.getElementById('gridHost').innerHTML = '<div class="mkx-own-grid">' + liste.slice(0, montrees).map(tuile).join('') + '</div>';
   document.querySelector('[data-market-more]').style.display = montrees >= liste.length ? 'none' : '';
 }
+// redessins du site : au clic sur une carte (même nombre de cartes) et après une mise en vente (retour à 24 cartes)
+window.__redessine = () => rendu();
+window.__vend = () => { montrees = 24; rendu(); };
+// à chaque image affichée, tri allumé : la grille visible commence-t-elle par la plus chère (Carte 40) ?
+window.__imagesMalTriees = 0; window.__imagesVues = 0;
+requestAnimationFrame(function verifie() {
+  const grille = document.querySelector('.mkx-own-grid');
+  if (window.__surveilleTri && grille && getComputedStyle(grille).visibility !== 'hidden') {
+    window.__imagesVues++;
+    const premiere = [...grille.children].find((t) => t.getBoundingClientRect().height > 0);
+    if (premiere?.querySelector('strong').textContent !== 'Carte 40') window.__imagesMalTriees++;
+  }
+  requestAnimationFrame(verifie);
+});
 document.addEventListener('click', (e) => {
   if (e.target.closest('[data-market-more]')) { if (onglet === 'buy') { window.__clics.plusAchat++; return; } window.__clics.plus++; montrees += 24; rendu(); }
   const tab = e.target.closest('[data-market-tab]');
@@ -147,6 +162,14 @@ rendu();
   await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-market-more]')).display === 'none', null, { timeout: 15000 }).catch(() => {});
   await page.waitForTimeout(600);
   out.triAllume = await tri();
+  // 5 a. le site redessine la grille (clic sur une carte), puis repart de 24 cartes (mise en vente) : à aucune image
+  // affichée l'ordre du site ne doit se voir (avant la 0.12.1 : clignotements, classement qui « hésite »)
+  await page.evaluate(() => { window.__surveilleTri = true; });
+  for (let i = 0; i < 5; i++) { await page.evaluate(() => window.__redessine()); await page.waitForTimeout(120); }
+  await page.evaluate(() => window.__vend());
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-market-more]')).display === 'none' && !document.documentElement.hasAttribute('data-yuro-tri-chargement'), null, { timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(400);
+  out.redessins = await page.evaluate(() => { window.__surveilleTri = false; return { malTriees: window.__imagesMalTriees, vues: window.__imagesVues, premiere: document.querySelector('.mkx-own-grid .mkx-own strong').textContent, nb: document.querySelectorAll('.mkx-own').length }; });
   // 5 bis. combiné avec Doublons : les 6 doublons, triés (seul Carte 150 a une annonce, les autres par cote)
   await page.click('.mkx-chips [data-yuro-doublons]');
   await page.waitForTimeout(600);
@@ -185,6 +208,7 @@ rendu();
     && /^en ligne 15\D000$/.test(out.triAllume.etiquettes.c40) && /^en ligne 9\D000 · 2 annonces$/.test(out.triAllume.etiquettes.c5)
     && ['c0', 'c7', 'c9', 'c1'].every((k) => out.triAllume.etiquettes[k] === 'aucune annonce')
     && JSON.stringify(out.triDoublons) === JSON.stringify(['Carte 150', 'Carte 1', 'Carte 30', 'Carte 45', 'Carte 59', 'Carte 299'])
+    && out.redessins.malTriees === 0 && out.redessins.vues > 5 && out.redessins.premiere === 'Carte 40' && out.redessins.nb === 300
     && out.triCoupe === 0
     && out.sansDonnees.puce === '値Prix en ligne ↓ (cote)' && out.sansDonneesMessage && out.sansDonnees.etiquettes.c0 === 'en ligne : ?'
     && JSON.stringify(out.parReponse.ordre) === JSON.stringify(['Carte 40', 'Carte 5', 'Carte 150', 'Carte 2', 'Carte 0', 'Carte 1'])

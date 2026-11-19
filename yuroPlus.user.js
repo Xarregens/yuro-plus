@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.12.0
+// @version      0.12.1
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm et en raid, « Suivant auto » dans le Château de l'infini, « Ouverture auto » des boosters gratuits et de quête avec journal des cartes rares, filtre « Doublons » et tri par prix en ligne au marché ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.12.0";
+  const YURO_VERSION = "0.12.1";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -920,7 +920,7 @@
   // tous les doublons apparaissent. Elle ne touche à rien d'autre (ni vente, ni prix).
   // Uniquement dans l'onglet Vendre : la page du marché porte section.market-page[data-mkx="sell"] (les onglets
   // Acheter / Échanges ont aussi des puces de rareté et un « Afficher plus », qu'il ne faut pas toucher).
-  const DOUBLONS_CSS = "html[data-yuro-filtre-doublons] .mkx-own-grid .mkx-own:not([data-yuro-doublon]) { display: none !important; }";
+  const DOUBLONS_CSS = "html[data-yuro-filtre-doublons] .mkx-own-grid .mkx-own:not([data-yuro-doublon]) { display: none !important; } html[data-yuro-tri-chargement] .mkx-own-grid { visibility: hidden !important; }";
   function zoneVente() {
     const page = document.querySelector('section.market-page[data-mkx="sell"]');
     const grille = page?.querySelector(".mkx-own-grid");
@@ -988,6 +988,7 @@
     puce.addEventListener("click", (event) => {
       event.stopPropagation(); // la puce n'est pas une rareté : le site n'a pas à la voir
       reglages.doublons = !reglages.doublons;
+      compteDoublons = null;
       chargement.sansProgres = 0;
       chargement.tuilesAuClic = -1;
       majDoublons();
@@ -995,6 +996,9 @@
     return puce;
   }
   let surVente = false;
+  // posés par l'observateur de mutations quand un changement touche la page du marché
+  let marcheSale = true;
+  let compteDoublons = null;
   function majDoublons() {
     const zone = zoneVente();
     // à chaque arrivée sur l'onglet Vendre, Doublons et Tri repartent éteints (demande du propriétaire, 19/11)
@@ -1013,12 +1017,23 @@
       style.textContent = DOUBLONS_CSS;
       document.head.append(style);
     }
+    if (!zone && document.documentElement.hasAttribute("data-yuro-tri-chargement")) document.documentElement.removeAttribute("data-yuro-tri-chargement");
+    if ((actif || reglages.triPrix) && !document.getElementById("yuro-plus-doublons-css")) {
+      const style = document.createElement("style");
+      style.id = "yuro-plus-doublons-css";
+      style.textContent = DOUBLONS_CSS;
+      document.head.append(style);
+    }
     // hors de l'onglet Vendre : pas de puce
     for (const egaree of document.querySelectorAll("[data-yuro-doublons], [data-yuro-tri]")) {
       if (!zone?.chips || egaree.parentElement !== zone.chips) egaree.remove();
     }
     if (!zone?.chips) return;
-    const doublons = marqueDoublons(zone.grille);
+    if (reglages.doublons && (marcheSale || compteDoublons === null)) {
+      marcheSale = false;
+      compteDoublons = marqueDoublons(zone.grille);
+    }
+    const doublons = compteDoublons ?? 0;
     puceDoublons ??= creePuceDoublons();
     if (puceDoublons.parentElement !== zone.chips) {
       stats.remontages++;
@@ -1032,6 +1047,9 @@
       puceDoublons.after(puceTri);
     }
     const chargeEncore = (reglages.doublons || reglages.triPrix) && chargement.sansProgres < 3 && visible(zone.plus) && !zone.plus.disabled;
+    // tri allumé : grille masquée tant que toute la liste n'est pas là, pour ne la montrer qu'une fois triée en entier
+    const masque = reglages.triPrix && chargeEncore;
+    if (masque !== document.documentElement.hasAttribute("data-yuro-tri-chargement")) document.documentElement.toggleAttribute("data-yuro-tri-chargement", masque);
     const ecrit = (puce, texte, allumee) => {
       const libelle = puce.querySelector("span");
       if (libelle.textContent !== texte) libelle.textContent = texte;
@@ -1124,41 +1142,60 @@
     if (source && source !== marche.source) indexeMarche(source);
     return source;
   }
-  function prixEnLigne(tuile) {
+  // ce qu'on lit sur chaque case (image, nom, rareté, cote, étiquette) est gardé en mémoire : le relire sur ~2 800
+  // cartes à chaque tri pesait sur une page déjà lente. Relu seulement si l'image ou le nom de la case changent.
+  const infosTuiles = new WeakMap();
+  function infosTuile(tuile) {
     const image = tuile.querySelector(".mkx-own-art img");
-    const parImage = marche.parImage.get(empreinte(image?.getAttribute("data-full")) ?? empreinte(image?.getAttribute("src")));
-    if (parImage) return parImage;
-    const nom = tuile.querySelector(".mkx-own-copy strong")?.textContent?.trim().toLowerCase() ?? "";
-    const code = (tuile.querySelector(".mkx-rar")?.textContent ?? "").replace(/[^A-Z]/g, "");
-    return marche.parNom.get(`${nom}|${RARETE_NOM[code] ?? ""}`) ?? null;
+    const src = image?.getAttribute("data-full") ?? image?.getAttribute("src") ?? "";
+    const nom = tuile.querySelector(".mkx-own-copy strong")?.textContent?.trim() ?? "";
+    let infos = infosTuiles.get(tuile);
+    if (!infos || infos.src !== src || infos.nom !== nom) {
+      const code = (tuile.querySelector(".mkx-rar")?.textContent ?? "").replace(/[^A-Z]/g, "");
+      const cote = parseInt((tuile.querySelector(".mkx-own-copy small")?.textContent ?? "").match(/cote\s*([\d\s\u202f\u00a0]+)/i)?.[1]?.replace(/\D/g, "") ?? "", 10) || 0;
+      infos = { src, nom, cle: empreinte(src), nomCle: `${nom.toLowerCase()}|${RARETE_NOM[code] ?? ""}`, cote, etiquette: null };
+      infosTuiles.set(tuile, infos);
+    }
+    return infos;
   }
-  const coteDe = (tuile) => parseInt((tuile.querySelector(".mkx-own-copy small")?.textContent ?? "").match(/cote\s*([\d\s  ]+)/i)?.[1]?.replace(/\D/g, "") ?? "", 10) || 0;
+  const prixDe = (infos) => marche.parImage.get(infos.cle) ?? marche.parNom.get(infos.nomCle) ?? null;
   const formatKi = (nombre) => Number(nombre).toLocaleString("fr-FR");
-  // trie les cases déjà chargées (les nouvelles arrivent au battement suivant) et écrit le prix en ligne sous chacune
+  // Trie les cases et écrit le prix en ligne sous chacune. Appelé AUSSITÔT qu'un changement touche la page du marché
+  // (dans l'observateur de mutations, donc avant que le navigateur affiche quoi que ce soit) : l'ordre du site ne se
+  // voit jamais. Avant la 0.12.1, le tri passait toutes les 100 ms : chaque redessin du site (clic sur une carte, mise
+  // en vente) montrait son ordre une fraction de seconde — clignotements et « hésitations » signalés le 19/11.
+  const tri = { sale: true, source: null };
   function trieParPrix() {
     const zone = zoneVente();
     if (!zone) return;
-    const tuiles = [...zone.grille.children].filter((element) => element.classList.contains("mkx-own"));
     if (!reglages.triPrix) {
       for (const etiquette of zone.grille.querySelectorAll("[data-yuro-prix]")) etiquette.remove();
       return;
     }
     donneesMarche();
-    const fiches = tuiles.map((tuile, rang) => ({ tuile, rang, offre: prixEnLigne(tuile), cote: coteDe(tuile) }));
-    for (const { tuile, offre } of fiches) {
-      const copie = tuile.querySelector(".mkx-own-copy");
-      if (!copie) continue;
-      let etiquette = copie.querySelector("[data-yuro-prix]");
-      if (!etiquette) {
-        etiquette = document.createElement("small");
-        etiquette.setAttribute("data-yuro-prix", "");
-        etiquette.style.cssText = "display:block;color:#7ee0a8;";
-        copie.append(etiquette);
+    tri.sale = false;
+    tri.source = marche.source;
+    const tuiles = [...zone.grille.children].filter((element) => element.classList.contains("mkx-own"));
+    const fiches = tuiles.map((tuile, rang) => {
+      const infos = infosTuile(tuile);
+      return { tuile, rang, infos, offre: prixDe(infos) };
+    });
+    for (const { tuile, infos, offre } of fiches) {
+      if (!infos.etiquette?.isConnected || !tuile.contains(infos.etiquette)) {
+        const copie = tuile.querySelector(".mkx-own-copy");
+        if (!copie) continue;
+        infos.etiquette = copie.querySelector("[data-yuro-prix]");
+        if (!infos.etiquette) {
+          infos.etiquette = document.createElement("small");
+          infos.etiquette.setAttribute("data-yuro-prix", "");
+          infos.etiquette.style.cssText = "display:block;color:#7ee0a8;";
+          copie.append(infos.etiquette);
+        }
       }
       const texte = !marche.source ? "en ligne : ?" : offre ? `en ligne ${formatKi(offre.min)}${offre.nb > 1 ? ` · ${offre.nb} annonces` : ""}` : "aucune annonce";
-      if (etiquette.textContent !== texte) etiquette.textContent = texte;
+      if (infos.etiquette.textContent !== texte) infos.etiquette.textContent = texte;
     }
-    const triees = [...fiches].sort((a, b) => (b.offre?.min ?? -1) - (a.offre?.min ?? -1) || b.cote - a.cote || a.rang - b.rang);
+    const triees = [...fiches].sort((a, b) => (b.offre?.min ?? -1) - (a.offre?.min ?? -1) || b.infos.cote - a.infos.cote || a.rang - b.rang);
     if (triees.some((fiche, index) => fiche.tuile !== tuiles[index])) {
       const avant = zone.plus && zone.plus.parentElement === zone.grille ? zone.plus : null;
       for (const { tuile } of triees) zone.grille.insertBefore(tuile, avant);
@@ -1757,7 +1794,12 @@
   const tickOuverture = createTicker(100);
   // le chargement de la liste du marché profite du même battement rapide
   tickOuverture.add(chargeDoublons);
-  tickOuverture.add(trieParPrix);
+  tick.add(() => {
+    // nouvelles annonces reçues (le site recharge le marché) : retrier ; sinon rien à faire
+    if (!reglages.triPrix || !zoneVente()) return;
+    donneesMarche();
+    if (tri.sale || marche.source !== tri.source) trieParPrix();
+  });
   // ---- yuroDiag.finCombat() : capture automatique de l'écran de fin de combat ----
   // L'écran de fin ne reste qu'une ou deux secondes quand le Replay auto du site est allumé : impossible d'y taper
   // yuroDiag.page() à temps. finCombat() attend le prochain écran de fin (ancien écran story-end-screen, ou tout bouton
@@ -1838,15 +1880,26 @@
   let fenetreRemontage = 0;
   let creationsAuDebut = 0;
   let freinJusqua = 0;
-  new MutationObserver(() => {
+  new MutationObserver((enregistrements) => {
     stats.mutations++;
+    // un changement dans la page du marché : recompter les doublons et retrier TOUT DE SUITE (avant l'affichage)
+    const zoneMarche = reglages.doublons || reglages.triPrix ? zoneVente() : null;
+    const marcheTouche = Boolean(zoneMarche) && enregistrements.some((enregistrement) => zoneMarche.page.contains(enregistrement.target));
+    if (marcheTouche) {
+      marcheSale = true;
+      tri.sale = true;
+    }
     const maintenant = Date.now();
-    if (maintenant < freinJusqua) return;
+    if (maintenant < freinJusqua) {
+      if (marcheTouche && reglages.triPrix) trieParPrix();
+      return;
+    }
     if (maintenant - fenetreRemontage > 1e3) {
       fenetreRemontage = maintenant;
       creationsAuDebut = totalCreations;
     }
     mountToggles();
+    if (marcheTouche && reglages.triPrix) trieParPrix();
     if (totalCreations - creationsAuDebut > reglages.remontagesMax) freinJusqua = maintenant + 5e3;
   }).observe(document.body, { childList: true, subtree: true });
   window.yuroPlus = {

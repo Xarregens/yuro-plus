@@ -181,6 +181,15 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   par Acheter). Rapprochement par empreinte d'image `/card-art/(t/)<hex>.webp`, sinon nom + rareté. Sans données :
   tri par cote, étiquettes « en ligne : ? », message. `yuroDiag.marche()` télécharge les données retenues (masquées) ;
   `yuroPlus.triPrix()`. Test `tests/marche.cjs` (clé inventée « offres » pour la liste des autres, exprès).
+  0.12.1 (signalé le 19/11 : clignotements, classement qui « hésite » 1–2 s après un clic sur une carte ou une mise en
+  vente, site lent) : le site redessine toute la grille dans SON ordre ; le tri, qui passait toutes les 100 ms,
+  laissait voir cet ordre. Désormais `trieParPrix` est appelé DANS l'observateur de mutations dès qu'un changement
+  touche `section.market-page` (avant l'affichage), plus seulement sur nouvelles données (battement 250 ms, `tri.sale`
+  / `tri.source`) ; pendant le chargement de la liste, tri allumé, la grille est masquée (`html[data-yuro-tri-
+  chargement]`, visibility:hidden) pour n'apparaître que complète et triée ; lecture des cases gardée en mémoire
+  (`infosTuiles`, WeakMap) ; Doublons recompté seulement puce allumée et grille changée (`marcheSale`,
+  `compteDoublons`). Test : images affichées comptées pendant 5 redessins + un retour à 24 cartes — la 0.12.0 en
+  montre 9 mal triées, la 0.12.1 aucune.
 - Combats après les modifs du site (17/11/2026) : apparition de `POST /api/save/combat` `{op:"hold"|"release",
   kind:"raid"}` (verrou de raid). Écrans de fin farm/château/Halloween non recapturés depuis : à vérifier si le
   propriétaire signale un bouton du script qui ne marche plus.
