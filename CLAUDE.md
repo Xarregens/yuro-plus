@@ -211,5 +211,16 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   0.11.6 `checkRejouer` : à la victoire, Replay auto du site allumé, écran pas encore `combat-end-leaving` → clic sur
   le bouton « Rejouer » des `.story-result-buttons` (jamais `[data-infinity-replay]` du château) après `rapideMs`.
   Test `tests/raid.cjs` (et vérifié sur le HTML réel capturé).
+- Lag (19/11 : le propriétaire rame, pas les autres joueurs du Discord). 0.12.2 : (1) le journal des requêtes ne
+  décode plus les réponses/requêtes de plus de `LIMITS.body` (20 000) caractères — les sauvegardes du jeu, toutes les
+  quelques secondes en combat — : texte brut coupé puis `masqueBrut` (e-mails + valeurs des clés sensibles par
+  expression régulière, même coupées) ; mesuré ≈ 4,3 ms → 0,14 ms par sauvegarde de 140 Ko, aller et retour ;
+  (2) la boîte noire n'appelle plus `document.getAnimations()` chaque seconde onglet visible (il force un recalcul des
+  styles de toute la page) : chaque seconde onglet caché, toutes les 15 s sinon ; (3) `yuroDiag.lag(s)` (30 s par
+  défaut) : chronomètre du code de Yuro Plus (`perf` / `mesure`, par partie : battements, observateur de la page,
+  journal des requêtes) + images en retard > 50 ms mesurées par le navigateur avec scripts classés par origine (le
+  site / Yuro Plus-Tampermonkey / autre extension) + poids de la page → résumé et `yuro-diag-lag-*.json` ; test
+  `tests/lag.cjs`. Pistes à départager avec ce rapport : accumulation d'effets onglet caché (page lourde même
+  visible), le script, le navigateur / d'autres extensions.
 - Le script note en permanence (mémoire glissante) les requêtes fetch/XHR du site et sa WebSocket, e-mails et clés
   sensibles masqués ; ne jamais enregistrer de jeton en clair dans un fichier téléchargé.

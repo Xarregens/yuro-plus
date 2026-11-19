@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yuro Plus
 // @namespace    https://github.com/xarregens/yuro-plus
-// @version      0.12.1
+// @version      0.12.2
 // @description  Compagnon pour yurocollection.fr : relance immédiate du replay auto en farm et en raid, « Suivant auto » dans le Château de l'infini, « Ouverture auto » des boosters gratuits et de quête avec journal des cartes rares, filtre « Doublons » et tri par prix en ligne au marché ; commandes d'enregistrement yuroDiag.
 // @author       Xarregens
 // @homepageURL  https://github.com/xarregens/yuro-plus
@@ -16,7 +16,7 @@
 
 (() => {
   if (window.top !== window) return;
-  const YURO_VERSION = "0.12.1";
+  const YURO_VERSION = "0.12.2";
 
   // ---- masquage : e-mails partout, clés sensibles dans les JSON ----
   const SECRET_KEY = /e-?mail|token|password|secret|session|auth|cookie/i;
@@ -30,6 +30,9 @@
     }
     return value;
   }
+  // masquage sans décoder : e-mails, et valeurs des clés sensibles dans un texte JSON (même coupé en plein milieu)
+  const CLE_SENSIBLE_BRUTE = /"([^"]*(?:e-?mail|token|password|secret|session|auth|cookie)[^"]*)"\s*:\s*("(?:[^"\\]|\\.)*"?|[^,}\]]*)/gi;
+  const masqueBrut = (texte) => mask(texte).replace(CLE_SENSIBLE_BRUTE, '"$1":"<masqué>"');
   const short = (text) => mask(text ?? "").replace(/\s+/g, " ").trim().slice(0, 48);
   function describeNode(node) {
     if (!node || node === window) return node === window ? "window" : String(node);
@@ -40,6 +43,22 @@
     return `${node.tagName.toLowerCase()}${node.id ? `#${node.id}` : ""}${classes ? `.${classes}` : ""} "${short(node.textContent ?? "")}"`;
   }
   const stamp = () => new Date().toISOString().slice(11, 23);
+  // chronomètre du script lui-même, actif seulement pendant yuroDiag.lag() : temps passé dans chaque partie
+  const perf = { actif: false, total: 0, parties: {} };
+  function mesure(partie, fn, ...args) {
+    if (!perf.actif) return fn(...args);
+    const debut = performance.now();
+    try {
+      return fn(...args);
+    } finally {
+      const duree = performance.now() - debut;
+      perf.total += duree;
+      const p = (perf.parties[partie] ??= { ms: 0, fois: 0, pireMs: 0 });
+      p.ms += duree;
+      p.fois++;
+      p.pireMs = Math.max(p.pireMs, duree);
+    }
+  }
 
   // ---- mémoire glissante des échanges avec le serveur, active en permanence :
   // le blocage arrive sans prévenir, ses requêtes doivent déjà être notées ----
@@ -62,9 +81,12 @@
     if (text && status === 200) noteMarche(method, path, text);
     // un seul passage par message (analyse, masquage, mesure) : ce journal tourne en permanence, y compris onglet caché
     // pendant les combats auto, il doit rester léger. Au-delà de 2 Mo, on note seulement la taille.
+    // Au-delà de LIMITS.body caractères (les sauvegardes du jeu, envoyées et reçues toutes les quelques secondes en
+    // combat, contiennent toute la collection), on ne décode plus le JSON : on masque le texte brut et on le coupe.
+    // Décoder, masquer et ré-encoder chaque sauvegarde pesait sur la page en permanence (lag signalé le 19/11).
     const capped = (value) => {
       if (value == null || typeof value !== "string") return null;
-      if (value.length > 2e6) return `<${value.length} caractères, non noté>`;
+      if (value.length > LIMITS.body) return masqueBrut(value.slice(0, LIMITS.body));
       try {
         const masked = maskJson(JSON.parse(value));
         const flat = JSON.stringify(masked);
@@ -91,7 +113,7 @@
     const requestBody = typeof init?.body === "string" ? init.body : null;
     const result = originalFetch.apply(this, arguments);
     result.then((response) => {
-      response.clone().text().then((text) => recordApi(method, url, response.status, startedAt, requestBody, text)).catch(() => {});
+      response.clone().text().then((text) => mesure("journal des requêtes", recordApi, method, url, response.status, startedAt, requestBody, text)).catch(() => {});
     }).catch(() => recordApi(method, url, 0, startedAt, requestBody, null));
     return result;
   };
@@ -1379,6 +1401,18 @@
     } catch {}
     let dernierEnvoi = 0;
     const codesEnvoyes = new Set();
+    // getAnimations() oblige le navigateur à recalculer les styles de toute la page : à chaque seconde, c'était un
+    // à-coup régulier pendant le jeu. Onglet caché (là où elles s'accumulent) : chaque seconde ; visible : toutes les 15 s.
+    let animationsComptees = null;
+    let comptageA = 0;
+    const comptageAnimations = (cache) => {
+      if (!document.getAnimations) return null;
+      if (cache || Date.now() - comptageA > 15e3) {
+        comptageA = Date.now();
+        animationsComptees = document.getAnimations().length;
+      }
+      return animationsComptees;
+    };
     const envoie = (message) => {
       try {
         worker?.postMessage(message);
@@ -1428,7 +1462,7 @@
           memoireMo: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null,
           // ce qui pourrait s'accumuler onglet caché et se rattraper d'un bloc au retour
           elements: document.getElementsByTagName("*").length,
-          animationsCss: document.getAnimations ? document.getAnimations().length : null
+          animationsCss: comptageAnimations(cache)
         } });
         stats.mutations = 0;
         stats.remontages = 0;
@@ -1468,6 +1502,90 @@
     return "lecture de la boîte noire…";
   };
   boiteNoire.annonce();
+  // ---- yuroDiag.lag(secondes) : qui fait ramer la page ? ----
+  // Pendant N secondes (30 par défaut) : temps passé dans le code de Yuro Plus (chronomètre `perf`), et toutes les
+  // images affichées en retard (> 50 ms) mesurées par le navigateur (« long animation frame »), avec pour chacune les
+  // scripts en cause classés par origine : le site, Yuro Plus / Tampermonkey, une autre extension. Plus le poids de la
+  // page (éléments, animations, mémoire) au début et à la fin. Résumé à l'écran, détail dans yuro-diag-lag-*.json.
+  const origineScript = (url) => {
+    const adresse = String(url ?? "");
+    if (!adresse) return "inconnue (code sans fichier)";
+    if (/userscript|tampermonkey|violentmonkey|greasemonkey|yuro.?plus/i.test(adresse)) return "Yuro Plus / Tampermonkey";
+    if (adresse.includes(location.host)) return "le site";
+    if (/^(chrome|moz|safari|edge)-extension:/i.test(adresse)) return "une autre extension";
+    return `autre (${adresse.split("?")[0].slice(-60)})`;
+  };
+  const poidsPage = () => ({
+    elements: document.getElementsByTagName("*").length,
+    animations: document.getAnimations ? document.getAnimations().length : null,
+    memoireMo: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null
+  });
+  let mesureLag = null;
+  window.yuroDiag.lag = (secondes = 30) => {
+    if (mesureLag) return "mesure déjà en cours";
+    const types = PerformanceObserver.supportedEntryTypes ?? [];
+    const type = types.includes("long-animation-frame") ? "long-animation-frame" : types.includes("longtask") ? "longtask" : null;
+    const releve = { images: 0, bloqueMs: 0, totalMs: 0, miseEnPageMs: 0, parOrigine: {}, parFonction: {}, pires: [] };
+    let observateur = null;
+    if (type) {
+      observateur = new PerformanceObserver((liste) => {
+        for (const image of liste.getEntries()) {
+          if (image.duration < 50) continue;
+          releve.images++;
+          releve.totalMs += image.duration;
+          releve.bloqueMs += image.blockingDuration ?? Math.max(0, image.duration - 50);
+          if (image.styleAndLayoutStart) releve.miseEnPageMs += image.startTime + image.duration - image.styleAndLayoutStart;
+          const scripts = [...(image.scripts ?? [])].map((script) => ({
+            origine: origineScript(script.sourceURL),
+            fonction: `${script.sourceFunctionName || "(anonyme)"} · ${String(script.invoker ?? "").slice(0, 60)}`,
+            ms: script.duration
+          }));
+          for (const script of scripts) {
+            releve.parOrigine[script.origine] = (releve.parOrigine[script.origine] ?? 0) + script.ms;
+            const cle = `${script.origine} — ${script.fonction}`;
+            releve.parFonction[cle] = (releve.parFonction[cle] ?? 0) + script.ms;
+          }
+          releve.pires.push({ t: stamp(), ms: Math.round(image.duration), scripts: scripts.slice(0, 5).map((x) => `${Math.round(x.ms)} ms ${x.origine} — ${x.fonction}`) });
+          releve.pires.sort((a, b) => b.ms - a.ms);
+          releve.pires.length = Math.min(releve.pires.length, 10);
+        }
+      });
+      try {
+        observateur.observe({ type, buffered: false });
+      } catch {}
+    }
+    perf.actif = true;
+    perf.total = 0;
+    perf.parties = {};
+    const debut = { quand: new Date().toISOString(), ...poidsPage() };
+    mesureLag = setTimeout(() => {
+      mesureLag = null;
+      perf.actif = false;
+      observateur?.disconnect();
+      const arrondi = (objet) => Object.fromEntries(Object.entries(objet).sort((a, b) => b[1] - a[1]).map(([cle, ms]) => [cle, Math.round(ms)]));
+      const rapport = {
+        version: YURO_VERSION,
+        dureeS: secondes,
+        mesureNavigateur: type ?? "indisponible",
+        pageDebut: debut,
+        pageFin: poidsPage(),
+        arrierePlan: fond.actif,
+        imagesEnRetard: releve.images,
+        tempsDesImagesEnRetardMs: Math.round(releve.totalMs),
+        tempsBloqueMs: Math.round(releve.bloqueMs),
+        miseEnPageMs: Math.round(releve.miseEnPageMs),
+        scriptsParOrigineMs: arrondi(releve.parOrigine),
+        fonctionsLesPlusLourdesMs: Object.fromEntries(Object.entries(arrondi(releve.parFonction)).slice(0, 15)),
+        pires: releve.pires,
+        yuroPlusChronoMs: Math.round(perf.total),
+        yuroPlusParPartie: Object.fromEntries(Object.entries(perf.parties).sort((a, b) => b[1].ms - a[1].ms).map(([cle, p]) => [cle, { ms: Math.round(p.ms), fois: p.fois, pireMs: Math.round(p.pireMs) }]))
+      };
+      const fichier = saveJson("yuro-diag-lag", rapport);
+      const part = (ms) => `${(ms / (secondes * 10)).toFixed(1)} %`;
+      toast(`Yuro Plus — mesure du lag sur ${secondes} s : ${releve.images} image(s) en retard (${Math.round(releve.totalMs)} ms au total). Code de Yuro Plus : ${Math.round(perf.total)} ms (${part(perf.total)} du temps). Scripts du site dans les images en retard : ${Math.round(releve.parOrigine["le site"] ?? 0)} ms. Page : ${rapport.pageFin.elements} éléments, ${rapport.pageFin.animations ?? "?"} animations. Détail : ${fichier}`);
+    }, secondes * 1e3);
+    return `mesure pendant ${secondes} s : joue normalement (là où ça rame), le résumé s’affichera et un fichier se téléchargera`;
+  };
   // Le navigateur sait mesurer toute image ou tâche anormalement longue, y compris hors de nos rejeux (retour au
   // premier plan, événements du site, calcul de la mise en page) et nommer les scripts en cause : « long animation
   // frame » (Chrome 123+), sinon « longtask » sans le détail. Rapport joint à la boîte noire au-delà d'une seconde.
@@ -1519,7 +1637,7 @@
     const listeners = new Set();
     const fire = () => listeners.forEach((listener) => {
       try {
-        listener();
+        mesure(`battement ${ms} ms`, listener);
       } catch {}
     });
     try {
@@ -1880,7 +1998,8 @@
   let fenetreRemontage = 0;
   let creationsAuDebut = 0;
   let freinJusqua = 0;
-  new MutationObserver((enregistrements) => {
+  new MutationObserver((enregistrements) => mesure("observateur de la page", surMutations, enregistrements)).observe(document.body, { childList: true, subtree: true });
+  function surMutations(enregistrements) {
     stats.mutations++;
     // un changement dans la page du marché : recompter les doublons et retrier TOUT DE SUITE (avant l'affichage)
     const zoneMarche = reglages.doublons || reglages.triPrix ? zoneVente() : null;
@@ -1901,7 +2020,7 @@
     mountToggles();
     if (marcheTouche && reglages.triPrix) trieParPrix();
     if (totalCreations - creationsAuDebut > reglages.remontagesMax) freinJusqua = maintenant + 5e3;
-  }).observe(document.body, { childList: true, subtree: true });
+  }
   window.yuroPlus = {
     version: YURO_VERSION,
     relances: 0,
