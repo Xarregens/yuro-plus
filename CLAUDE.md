@@ -165,6 +165,22 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   plus » jusqu'au bout (`chargeDoublons` : plusieurs clics d'affilée tant que le site ajoute les cartes aussitôt, 120 ms
   max par battement ; arrêt après 3 clics sans nouvelle carte). Anti-clignotement (0.10.1) : une seule puce gardée
   pour la séance et remise en place telle quelle, sans animation ni transition, chiffres à largeur fixe.
+  0.12.0 (demandes du 19/11) : Doublons N'EST PLUS mémorisé et repart éteint à chaque arrivée sur l'onglet Vendre
+  (`surVente` dans `majDoublons`). Nouvelle puce « 値 Prix en ligne » (`[data-yuro-tri]`, `reglages.triPrix`, même
+  règle) : charge toute la liste (même chargeur que Doublons) et range les cases de la grille par le prix le MOINS
+  CHER EN LIGNE chez les autres joueurs, décroissant (comme « Moins chère en ligne : 7100 · 1 annonce » du panneau de
+  droite, « Aucune autre annonce de cette carte en ligne. » sinon), puis cartes sans annonce par cote décroissante ;
+  étiquette `[data-yuro-prix]` « en ligne 7 100 · 2 annonces » / « aucune annonce » sous chaque carte. Données :
+  GET /api/market (capture du 17/11 : `mine` = mes annonces {id, card:{name,image,rarity,series,…}, kind sale|trade,
+  price, status active|sold|cancelled|expired, seller_id, seller_name, card_key}, `sales` = ventes récentes {price,
+  card_key, created_at} ; la liste des annonces des AUTRES n'a jamais été vue en entier, journal coupé à 20 000
+  caractères). D'où `extraitAnnonces` générique : tout objet {price:number, card:{…}} hors `mine`, vente active, d'un
+  vendeur autre que moi (seller_id des ventes de `mine`). Source : `marketUI.data` du site (variable de premier niveau
+  de son script, déjà vue dans son code) sinon la dernière réponse complète de /api/market lue dans `recordApi` →
+  `noteMarche` (le script démarre après le site : sans marketUI, il faut que le site recharge le marché, p. ex. passage
+  par Acheter). Rapprochement par empreinte d'image `/card-art/(t/)<hex>.webp`, sinon nom + rareté. Sans données :
+  tri par cote, étiquettes « en ligne : ? », message. `yuroDiag.marche()` télécharge les données retenues (masquées) ;
+  `yuroPlus.triPrix()`. Test `tests/marche.cjs` (clé inventée « offres » pour la liste des autres, exprès).
 - Combats après les modifs du site (17/11/2026) : apparition de `POST /api/save/combat` `{op:"hold"|"release",
   kind:"raid"}` (verrou de raid). Écrans de fin farm/château/Halloween non recapturés depuis : à vérifier si le
   propriétaire signale un bouton du script qui ne marche plus.
