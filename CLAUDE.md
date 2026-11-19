@@ -220,7 +220,9 @@ toucher au vrai site autrement qu'en lecture. Même façon de travailler que le 
   défaut) : chronomètre du code de Yuro Plus (`perf` / `mesure`, par partie : battements, observateur de la page,
   journal des requêtes) + images en retard > 50 ms mesurées par le navigateur avec scripts classés par origine (le
   site / Yuro Plus-Tampermonkey / autre extension) + poids de la page → résumé et `yuro-diag-lag-*.json` ; test
-  `tests/lag.cjs`. Pistes à départager avec ce rapport : accumulation d'effets onglet caché (page lourde même
-  visible), le script, le navigateur / d'autres extensions.
+  `tests/lag.cjs`. RÉSOLU le 19/11, hors script : le rapport `yuroDiag.lag()` montrait le code de Yuro Plus à 39 ms
+  sur 30 s, une page légère (~1 000 éléments), mais 137 images en retard sans script en cause ; `opera://gpu` : tout
+  en « Software only », pilote actif « Microsoft Basic Render Driver » au lieu de la Radeon. Cause : AMD Adrenalin
+  mis à jour sans relance. Pour un lag futur : `yuroDiag.lag()` d'abord, puis `opera://gpu` (navigateur : Opera GX).
 - Le script note en permanence (mémoire glissante) les requêtes fetch/XHR du site et sa WebSocket, e-mails et clés
   sensibles masqués ; ne jamais enregistrer de jeton en clair dans un fichier téléchargé.
